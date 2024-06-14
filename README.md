@@ -1,1 +1,1 @@
-# DOGE : Dynamic Obstacle Ground-based Evation
+# DOGE : Dynamic Obstacle Ground-based Evasion
