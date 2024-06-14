@@ -4,3 +4,5 @@ logs/
 log/
 install/
 venv/
+MUJOCO_LOG.txt
+videos/
