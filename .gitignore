@@ -6,3 +6,4 @@ install/
 venv/
 MUJOCO_LOG.txt
 videos/
+__pycache__/

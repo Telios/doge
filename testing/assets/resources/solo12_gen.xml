@@ -30,7 +30,8 @@
   <worldbody>
     <!-- Robot base -->
     <body name="base_link">
-      <camera name="track" mode="trackcom" pos="0 -0.75 0.75" xyaxes="1 0 0 0 1 1"/>      
+      <camera name="front-camera" mode="fixed" pos="0.15 0 0.05" euler="1.57 -1.57 0"/>
+      <camera name="track" mode= "trackcom" pos="0 -0.75 0.75" xyaxes="1 0 0 0 1 1"/>      
       <joint type="free"/>
       <inertial pos="-0.00082966 1.05e-06 -0.0006021" quat="-0.00116678 0.706653 0.00115432 0.707559" mass="1.25124" diaginertia="0.0160537 0.0138852 0.00266206"/>
       <include file="resources/meshes/solo_12_base/solo_12_base.xml"/>
