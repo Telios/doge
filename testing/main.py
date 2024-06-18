@@ -16,22 +16,22 @@ mujoco.mj_step(model, data)
 
 projectile = MujocoObject(model, data, 'projectile1')
 esim = esim_torch.ESIM(
-  0.2,
-  0.2,
-  0,
+  contrast_threshold_neg=0.2,
+  contrast_threshold_pos=0.2,
+  refractory_period_ns=0,
 )
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(DEVICE)
-duration = 200
+duration = 20
 framerate = 30
-save_video = False
-my_force = np.array([-0.4, 0.0, 1.1])
+save_video = True
+my_force = utils.calculate_force_vector(data.body('base_link').xpos, projectile.position())
 
 scene_option = mujoco.MjvOption()
 
 if save_video:
-  video_writer = cv.VideoWriter('testing/videos/output.avi', cv.VideoWriter_fourcc(*'XVID'), framerate, (renderer.width, renderer.height))
+  video_writer = cv.VideoWriter('testing/videos/output.avi', cv.VideoWriter_fourcc(*'XVID'), framerate, (renderer.width * 3, renderer.height))
 resetted = False
 
 def get_event_image(img_in, timestamp):
@@ -62,6 +62,7 @@ while data.time < duration:
   elif data.time % 5 > 0.3 and data.time % 5 < 0.4:
     projectile.reset_force()
   elif data.time % 5 > 4.0 and not resetted:
+    projectile.reset_position_all()
     projectile.reset_position_random()
     my_force = utils.calculate_force_vector(data.body('base_link').xpos, projectile.position())
     resetted = True

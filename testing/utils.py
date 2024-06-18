@@ -6,7 +6,7 @@ def euler_to_quat(euler):
     r = Rotation.from_euler('xyz', euler)
     return r.as_quat()
 
-def calculate_force_vector(goal_pos, current_pos, force_x=-0.4, force_z=1.1):
+def calculate_force_vector(goal_pos, current_pos, force_x=-0.7, force_z=0.9):
     """Calculate force vector to reach goal position."""
     force = np.array([0.0, 0.0, 0.0])
     force[0] = force_x
