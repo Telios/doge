@@ -1,0 +1,3 @@
+[submodule "external/rpg_vid2e"]
+	path = external/rpg_vid2e
+	url = https://github.com/Telios/rpg_vid2e.git
