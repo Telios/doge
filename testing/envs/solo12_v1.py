@@ -1,0 +1,287 @@
+import numpy as np
+
+from gymnasium import utils
+from gymnasium.envs.mujoco import MujocoEnv
+from gymnasium.spaces import Box, Dict
+import torch, esim_torch, time
+import cv2 as cv
+from mujoco_object import MujocoObject
+import doge_utils
+
+DEFAULT_CAMERA_CONFIG = {
+    "distance": 0.75,
+    "lookat": np.array((0.0, 0.0, 2.0)),
+    "elevation": -20.0,
+}
+
+class Solo12Env(MujocoEnv, utils.EzPickle):
+    metadata = {
+        "render_modes": [
+            "human",
+            "rgb_array",
+            "depth_array",
+        ],
+        "render_fps": 100,
+    }
+
+    def __init__(
+            self,
+            xml_file="/home/ubuntu/victor/learning_world_model/gym/envs/assets/scene.xml",
+            ctrl_cost_weight=0.5,
+            use_contact_forces=False,
+            contact_cost_weight=5e-4,
+            healthy_reward=1.0,
+            terminate_when_unhealthy=True, # default True
+            healthy_z_range=(-0.35, 0.5),
+            goal_z = -0.2,
+            contact_force_range=(-1.0, 1.0),
+            reset_noise_scale=0.1,
+            exclude_current_positions_from_observation=True,
+            **kwargs,
+    ):
+        utils.EzPickle.__init__(
+            self,
+            xml_file,
+            ctrl_cost_weight,
+            use_contact_forces,
+            contact_cost_weight,
+            healthy_reward,
+            terminate_when_unhealthy,
+            healthy_z_range,
+            goal_z,
+            contact_force_range,
+            reset_noise_scale,
+            exclude_current_positions_from_observation,
+            **kwargs,
+            )
+        
+        self._ctrl_cost_weight = ctrl_cost_weight
+        self._contact_cost_weight = contact_cost_weight
+
+        self._healthy_reward = healthy_reward
+        self._terminate_when_unhealthy = terminate_when_unhealthy
+        self._healthy_z_range = healthy_z_range
+        self._goal_z = goal_z
+        self._time_limit = 25
+        self._time_elapsed = 0
+        self._time_start_ns = time.time_ns()
+
+        self.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._esim = esim_torch.ESIM(
+            contrast_threshold_neg=0.2,
+            contrast_threshold_pos=0.2,
+            refractory_period_ns=0,
+        )
+
+        self._contact_force_range = contact_force_range
+
+        self._reset_noise_scale = reset_noise_scale
+
+        self._use_contact_forces = use_contact_forces
+
+        self._exclude_current_positions_from_observation = (
+            exclude_current_positions_from_observation
+        )
+
+        obs_shape = 19
+        if not self._exclude_current_positions_from_observation:
+            obs_shape += 6
+        if use_contact_forces:
+            obs_shape += 12
+            # TODO: check what dimensions are correct for all obs_shapes defined for Solo12
+        
+        observation_space = Dict(
+            {"state":
+            Box(
+            low=-np.inf,
+            high=np.inf,
+            shape=(obs_shape,),
+            dtype=np.float64,
+        ),
+            "image":
+            Box(
+            low=0,
+            high=255,
+            shape=(64, 64, 3),
+            dtype=np.uint8,
+            ),}
+        )
+
+        MujocoEnv.__init__(
+            self,
+            xml_file,
+            5,
+            observation_space=observation_space,
+            camera_id=0,
+            default_camera_config=DEFAULT_CAMERA_CONFIG,
+            **kwargs,
+        )
+
+        self._projectile = MujocoObject(self.model, self.data, 'projectile1')
+
+        self._force = doge_utils.calculate_force_vector(self.data.body('base_link').xpos, self._projectile.position())
+
+    @property
+    def healthy_reward(self):
+        return (
+            float(self.is_healthy or self._terminate_when_unhealthy)
+            * self._healthy_reward
+        )
+    
+    def control_cost(self, action):
+        control_cost = self._ctrl_cost_weight * np.sum(np.square(action))
+        return control_cost
+    
+    @property
+    def contact_forces(self):
+        raw_contact_forces = self.data.cfrc_ext
+        min_value, max_value = self._contact_force_range
+        contact_forces = np.clip(raw_contact_forces, min_value, max_value)
+        return contact_forces
+    
+    @property
+    def contact_cost(self):
+        contact_cost = self._contact_cost_weight * np.sum(np.square(self.contact_forces))
+        return contact_cost
+    
+    @property
+    def is_healthy(self):
+        state = self.get_body_com("base_link")
+        min_z, max_z = self._healthy_z_range
+        #print(self.get_body_com("base_link")[:3])
+        is_healthy = np.isfinite(state).all() and min_z <= state[2] <= max_z
+        return is_healthy
+    
+    @property
+    def terminated(self):
+        healthy = not self.is_healthy if self._terminate_when_unhealthy else False
+        time_up = self._time_elapsed >= self._time_limit
+        return healthy or time_up
+    
+    def step(self, action):
+      self.apply_force()
+      healthy_reward = self.healthy_reward
+      # get velocity 
+      xy_position_before = self.get_body_com("base_link")[:2].copy()
+      self.do_simulation(action, self.frame_skip)
+      timestamp_ns = time.time_ns() - self._time_start_ns
+      xy_position_after = self.get_body_com("base_link")[:2].copy()
+      xy_velocity = (xy_position_after - xy_position_before) / self.dt
+      self._time_elapsed += self.dt
+
+      FR_LOWER_LEG_pos = self.get_body_com("FR_LOWER_LEG")[:3]
+      FL_LOWER_LEG_pos = self.get_body_com("FL_LOWER_LEG")[:3]
+      HL_LOWER_LEG_pos = self.get_body_com("HL_LOWER_LEG")[:3]
+      HR_LOWER_LEG_pos = self.get_body_com("HR_LOWER_LEG")[:3]
+      base_link_pos = self.get_body_com("base_link")[:3]
+
+      z_goal_reward = 5 - np.abs(base_link_pos[2] - self._goal_z)
+      - np.abs(FR_LOWER_LEG_pos[2] - self._goal_z * 1.5) 
+      - np.abs(FL_LOWER_LEG_pos[2] - self._goal_z * 1.5)
+      - np.abs(HL_LOWER_LEG_pos[2] - self._goal_z * 1.5)
+      - np.abs(HR_LOWER_LEG_pos[2] - self._goal_z * 1.5)
+      distance_to_origin = np.linalg.norm(base_link_pos[:2])
+
+      # get up vector from triangle spanned from the 4 legs
+      up_vector = np.cross(HL_LOWER_LEG_pos - HR_LOWER_LEG_pos, FR_LOWER_LEG_pos - HR_LOWER_LEG_pos)
+      up_vector = up_vector / np.linalg.norm(up_vector)
+      # reward for being upright
+
+      cosine_similarity = np.dot(up_vector, np.array([0, 0, 1]))
+          
+      reward = z_goal_reward - distance_to_origin + cosine_similarity * 3
+      #print("pos: ", base_link_pos[:2])
+      reward = xy_velocity[0] + xy_velocity[1]
+      terminated = self.terminated
+      observation = self._get_obs()
+      # convert to event image
+      observation['image'] = self.get_event_image(observation['image'], timestamp_ns)
+      info = {
+            "reward_survive": healthy_reward,
+            "reward": reward,
+            "xy_velocity": xy_velocity,
+            "is_terminal": terminated,
+            "time_elapsed": self._time_elapsed,
+        }
+      
+      if self.render_mode == "human":
+          self.render()
+      # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
+      return observation, reward, terminated, False, info  
+    
+    def get_event_image(self, img_in, timestamp):
+        img = cv.cvtColor(img_in, cv.COLOR_RGB2GRAY)
+        img = np.log(img.astype("float32") / 255 + 1e-4)
+        img = torch.from_numpy(img).to(self.DEVICE)
+        timestamp = torch.tensor([timestamp], device=self.DEVICE, dtype=torch.int64)
+
+        events = self._esim.forward(img, torch.tensor([timestamp], device=self.DEVICE))
+        if events is None:
+            # return white image with the same size as the input image
+            return np.ones((img_in.shape[0], img_in.shape[1], 3), dtype=np.uint8) * 255
+        image_color = torch.stack([img, img, img], -1)
+        image_color[:,:,:] = 255
+        image_color[events['y'], events['x'], :] = 0
+        image_color[events['y'], events['x'], events['p']] = 200
+
+        image_color[:,:,0] = image_color[:,:,1]
+        image_color = image_color.cpu().numpy()
+        image_color = image_color.astype(np.uint8)
+        return image_color
+      
+    def apply_force(self):
+        if self.data.time < 0.2:
+            self._projectile.apply_force(self._force, self.model, self.data)
+        elif self.data.time % 5 > 0.3 and self.data.time % 5 < 0.4:
+            self._projectile.reset_force()
+
+    def _get_obs(self):
+        obs = {}
+        obs["state"] = self.data.qpos[:-7].flat.copy()
+        obs["image"] = self.render()
+        obs["image_color"] = obs["image"]
+        obs["overview_img"] = self.render(camera_id=1)
+        return obs
+
+        if self._exclude_current_positions_from_observation:
+            position = position[2:]
+
+        if self._use_contact_forces:
+            contact_forces = self.contact_forces.flat.copy()
+            return np.concatenate((position, velocity, contact_forces))
+        else:
+            return np.concatenate((position, velocity))
+        
+
+    def reset_model(self):
+        noise_low = -self._reset_noise_scale
+        noise_high = self._reset_noise_scale
+
+        qpos = self.init_qpos[:-7] + self.np_random.uniform(
+            low=noise_low, high=noise_high, size=self.model.nq - 7
+        )
+        qpos = np.append(qpos, self._projectile.get_random_reset_pos())
+        qvel = (
+            self.init_qvel
+            + self._reset_noise_scale * self.np_random.standard_normal(self.model.nv)
+        )
+        self.set_state(qpos, qvel)
+        self._force = doge_utils.calculate_force_vector(self.data.body('base_link').xpos, self._projectile.position())
+
+        observation = self._get_obs()
+        timestamp_ns = time.time_ns() - self._time_start_ns
+        observation['image'] = self.get_event_image(observation['image'], timestamp_ns)
+
+        return observation
+    
+    def reset(
+        self,
+    ):
+        self._reset_simulation()
+        ob = self.reset_model()
+        self._time_elapsed = 0
+        return ob
+    
+    def render(self, camera_id=0):
+        return self.mujoco_renderer.render(render_mode=self.render_mode, camera_id=camera_id)
+    

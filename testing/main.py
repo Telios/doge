@@ -2,8 +2,9 @@ import cv2 as cv
 import mujoco
 import numpy as np
 from mujoco_object import MujocoObject
-import utils
+import testing.doge_utils as doge_utils
 import torch, time, esim_torch
+import gymnasium as gym
 
 model = mujoco.MjModel.from_xml_path('./testing/assets/scene.xml')
 data = mujoco.MjData(model)
@@ -26,7 +27,7 @@ print(DEVICE)
 duration = 20
 framerate = 30
 save_video = True
-my_force = utils.calculate_force_vector(data.body('base_link').xpos, projectile.position())
+my_force = doge_utils.calculate_force_vector(data.body('base_link').xpos, projectile.position())
 
 scene_option = mujoco.MjvOption()
 
@@ -64,7 +65,7 @@ while data.time < duration:
   elif data.time % 5 > 4.0 and not resetted:
     projectile.reset_position_all()
     projectile.reset_position_random()
-    my_force = utils.calculate_force_vector(data.body('base_link').xpos, projectile.position())
+    my_force = doge_utils.calculate_force_vector(data.body('base_link').xpos, projectile.position())
     resetted = True
   mujoco.mj_step(model, data)
   timestamp_ns = time.time_ns() - starttime
