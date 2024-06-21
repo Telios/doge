@@ -156,7 +156,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
     def terminated(self):
         healthy = not self.is_healthy if self._terminate_when_unhealthy else False
         time_up = self._time_elapsed >= self._time_limit
-        return healthy or time_up
+        return healthy or time_up or self.check_collision()
     
     def step(self, action):
       self.apply_force()
@@ -229,6 +229,19 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         image_color = image_color.astype(np.uint8)
         return image_color
       
+    def check_collision(self):
+        # get ids for all solo12 geometries
+        body_names = {'base_link', 'FL_SHOULDER', 'FL_UPPER_LEG', 'FL_LOWER_LEG', 'FL_FOOT', 'HL_SHOULDER', 'HL_UPPER_LEG', 'HL_LOWER_LEG', 'HL_FOOT', 'FR_SHOULDER', 'FR_UPPER_LEG', 'FR_LOWER_LEG', 'FR_FOOT', 'HR_SHOULDER', 'HR_UPPER_LEG', 'HR_LOWER_LEG', 'HR_FOOT'}
+        body_ids = [self.data.body(name).id for name in body_names]
+        ball_id = self.model.body('projectile1').id
+        for contact in self.data.contact:
+            if self.model.geom_bodyid[contact.geom[0]] in body_ids and self.model.geom_bodyid[contact.geom[1]] == ball_id or self.model.geom_bodyid[contact.geom[1]] in body_ids and self.model.geom_bodyid[contact.geom[0]] == ball_id:
+                print("Collision detected between ball and solo12")
+                self._healthy_reward = 0
+                return True
+        return False
+        
+
     def apply_force(self):
         if self.data.time < 0.2:
             self._projectile.apply_force(self._force, self.model, self.data)
