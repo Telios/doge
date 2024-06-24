@@ -1,7 +1,7 @@
 import mujoco
 import numpy as np
 import copy
-import doge_utils
+from testing import doge_utils
 
 class MujocoObject:
     def __init__(self, model, data, bodyname):

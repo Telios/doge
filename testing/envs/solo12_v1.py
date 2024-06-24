@@ -5,11 +5,11 @@ from gymnasium.envs.mujoco import MujocoEnv
 from gymnasium.spaces import Box, Dict
 import torch, esim_torch, time
 import cv2 as cv
-from mujoco_object import MujocoObject
-import doge_utils
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
+from testing.mujoco_object import MujocoObject
+from testing import doge_utils
 from external.IEBCS.src.event_buffer import EventBuffer
 from external.IEBCS.src.dvs_sensor import init_bgn_hist_cpp
 from external.IEBCS.src.event_display import EventDisplay
@@ -87,7 +87,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         dsi.initSimu(self._height, self._width)
         dsi.initLatency(200, 50, 50, 300)
         dsi.initContrast(0.3, 0.3, 0.05)
-        init_bgn_hist_cpp("./external/IEBCS/data/noise_pos_161lux.npy", "./external/IEBCS/data/noise_pos_161lux.npy")
+        init_bgn_hist_cpp(f"{os.getcwd()}/../external/IEBCS/data/noise_pos_161lux.npy", f"{os.getcwd()}/../external/IEBCS/data/noise_pos_161lux.npy")
         self._ev_full = EventBuffer(1)
         self._ed = EventDisplay("Events", self._width, self._height, 2000)
         self._is_init = False
@@ -300,7 +300,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         obs["state"] = self.data.qpos[:-7].flat.copy()
         obs["image"] = self.render()
         obs["image_color"] = obs["image"]
-        obs["overview_img"] = self.render(camera_id=1)
+        #obs["overview_img"] = self.render(camera_id=1)
         return obs
 
         if self._exclude_current_positions_from_observation:
