@@ -4,6 +4,6 @@
 [submodule "dreamerv3"]
 	path = dreamerv3
 	url = https://github.com/Telios/dreamerv3.git
-[submodule "testing/assets/scene_sim"]
-	path = testing/assets/scene_sim
-	url = https://github.com/vikashplus/scene_sim.git
+[submodule "external/IEBCS"]
+	path = external/IEBCS
+	url = https://github.com/Telios/IEBCS.git

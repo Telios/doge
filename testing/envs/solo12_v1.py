@@ -7,6 +7,15 @@ import torch, esim_torch, time
 import cv2 as cv
 from mujoco_object import MujocoObject
 import doge_utils
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
+from external.IEBCS.src.event_buffer import EventBuffer
+from external.IEBCS.src.dvs_sensor import init_bgn_hist_cpp
+from external.IEBCS.src.event_display import EventDisplay
+import dsi
+
+
 
 DEFAULT_CAMERA_CONFIG = {
     "distance": 0.75,
@@ -62,7 +71,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._terminate_when_unhealthy = terminate_when_unhealthy
         self._healthy_z_range = healthy_z_range
         self._goal_z = goal_z
-        self._time_limit = 25
+        self._time_limit = 1.5
         self._time_elapsed = 0
         self._time_start_ns = time.time_ns()
 
@@ -72,6 +81,16 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             contrast_threshold_pos=0.2,
             refractory_period_ns=0,
         )
+
+        self._width = 128
+        self._height = 128
+        dsi.initSimu(self._height, self._width)
+        dsi.initLatency(200, 50, 50, 300)
+        dsi.initContrast(0.3, 0.3, 0.05)
+        init_bgn_hist_cpp("./external/IEBCS/data/noise_pos_161lux.npy", "./external/IEBCS/data/noise_pos_161lux.npy")
+        self._ev_full = EventBuffer(1)
+        self._ed = EventDisplay("Events", self._width, self._height, 2000)
+        self._is_init = False
 
         self._contact_force_range = contact_force_range
 
@@ -195,7 +214,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       terminated = self.terminated
       observation = self._get_obs()
       # convert to event image
-      observation['image'] = self.get_event_image(observation['image'], timestamp_ns)
+      observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
       info = {
             "reward_survive": healthy_reward,
             "reward": reward,
@@ -209,7 +228,15 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
       return observation, reward, terminated, False, info  
     
-    def get_event_image(self, img_in, timestamp):
+    def get_event_image(self, img_in, timestamp, mode="esim"):
+        if mode == "esim":
+            return self.get_event_image_esim(img_in, timestamp)
+        elif mode == "iebcs":
+            return self.get_event_image_iebcs(img_in)
+        else:
+            return self.get_event_image_esim(img_in, timestamp)
+        
+    def get_event_image_esim(self, img_in, timestamp):
         img = cv.cvtColor(img_in, cv.COLOR_RGB2GRAY)
         img = np.log(img.astype("float32") / 255 + 1e-4)
         img = torch.from_numpy(img).to(self.DEVICE)
@@ -228,6 +255,27 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         image_color = image_color.cpu().numpy()
         image_color = image_color.astype(np.uint8)
         return image_color
+    
+    def get_event_image_iebcs(self, img_in):
+        dt = 1000
+        if img_in is None:
+            return
+        img = cv.cvtColor(img_in, cv.COLOR_RGB2LUV)[:, :, 0]
+        if not self._is_init:
+            dsi.initImg(img)
+            self._is_init = True
+        else:
+            buf = dsi.updateImg(img, dt)
+            ev = EventBuffer(1)
+            ev.add_array(np.array(buf["ts"], dtype=np.uint64),
+                            np.array(buf["x"], dtype=np.uint16),
+                            np.array(buf["y"], dtype=np.uint16),
+                            np.array(buf["p"], dtype=np.uint64),
+                            100000000)
+            self._ed.update(ev, dt)
+            self._ev_full.increase_ev(ev)
+        return self._ed.im
+
       
     def check_collision(self):
         # get ids for all solo12 geometries
@@ -236,7 +284,6 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         ball_id = self.model.body('projectile1').id
         for contact in self.data.contact:
             if self.model.geom_bodyid[contact.geom[0]] in body_ids and self.model.geom_bodyid[contact.geom[1]] == ball_id or self.model.geom_bodyid[contact.geom[1]] in body_ids and self.model.geom_bodyid[contact.geom[0]] == ball_id:
-                print("Collision detected between ball and solo12")
                 self._healthy_reward = 0
                 return True
         return False

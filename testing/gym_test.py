@@ -13,7 +13,9 @@ obs = env.reset()
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-for i in tqdm(range(100)):
+video_writer = cv.VideoWriter("testing/videos/gym_dynamic_obstacles.avi", cv.VideoWriter_fourcc(*"XVID"), 30, (640*3, 640))
+
+for i in tqdm(range(1000)):
     action = np.zeros(12)
     obs, reward, terminated, truncated, info = env.step(action)
     #print(info)
@@ -25,7 +27,9 @@ for i in tqdm(range(100)):
     overview_img = cv.cvtColor(overview_img, cv.COLOR_RGB2BGR)
     concated_img = np.concatenate((image, image_color, overview_img), axis=1)
     cv.imshow("frame", concated_img)
+    video_writer.write(concated_img)
     cv.waitKey(1)
     if terminated:
         env.reset()
 env.close()
+video_writer.release()
