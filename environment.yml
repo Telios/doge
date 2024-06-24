@@ -15,6 +15,7 @@ dependencies:
   - pytorch-cuda=12.1
   - pip:
     - opencv-python
+    - numpy==1.26.4
     - mujoco
     - scipy
     - torch
