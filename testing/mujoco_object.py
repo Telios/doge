@@ -28,15 +28,15 @@ class MujocoObject:
     def set_initial_pos(self):
         self.initial_pos = copy.deepcopy(self.position())
         self.initial_pos_all = copy.deepcopy(self.data.qpos)
-        print(f'Initial {self.position_string(self.initial_pos)}')
+        #print(f'Initial {self.position_string(self.initial_pos)}')
 
     def set_rotation(self, euler):
         quat = doge_utils.euler_to_quat(euler)
         self.data.qpos[self.bodyid + 3 : self.bodyid + 7] = quat
-        print(f'Set rotation of {self.bodyname} to {euler}')
+        #print(f'Set rotation of {self.bodyname} to {euler}')
     
     def reset_position(self):
-        print(f'Resetted {self.position_string(self.initial_pos)}')
+        #print(f'Resetted {self.position_string(self.initial_pos)}')
         self.data.qpos[self.bodyid + 1 : self.bodyid + 8] = self.initial_pos
 
     def reset_position_all(self):
@@ -46,7 +46,7 @@ class MujocoObject:
         # Randomize y coordinate of object
         self.data.qpos[self.bodyid + 1 : self.bodyid + 8] = self.initial_pos
         self.data.qpos[self.bodyid + 2] = np.random.uniform(-1, 1)
-        print(f'Resetted {self.position_string(self.position())}')
+        #print(f'Resetted {self.position_string(self.position())}')
 
     def get_random_reset_pos(self):
         reset_pos = self.initial_pos

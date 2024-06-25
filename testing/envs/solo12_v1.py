@@ -71,7 +71,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._terminate_when_unhealthy = terminate_when_unhealthy
         self._healthy_z_range = healthy_z_range
         self._goal_z = goal_z
-        self._time_limit = 1.5
+        self._time_limit = 2
         self._time_elapsed = 0
         self._time_start_ns = time.time_ns()
 
@@ -82,8 +82,8 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             refractory_period_ns=0,
         )
 
-        self._width = 128
-        self._height = 128
+        self._width = 64
+        self._height = 64
         dsi.initSimu(self._height, self._width)
         dsi.initLatency(200, 50, 50, 300)
         dsi.initContrast(0.3, 0.3, 0.05)
@@ -167,7 +167,8 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
     def is_healthy(self):
         state = self.get_body_com("base_link")
         min_z, max_z = self._healthy_z_range
-        #print(self.get_body_com("base_link")[:3])
+        #print(self.get_body_com("base_link")[:3])#
+        
         is_healthy = np.isfinite(state).all() and min_z <= state[2] <= max_z
         return is_healthy
     
@@ -204,14 +205,16 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       # get up vector from triangle spanned from the 4 legs
       up_vector = np.cross(HL_LOWER_LEG_pos - HR_LOWER_LEG_pos, FR_LOWER_LEG_pos - HR_LOWER_LEG_pos)
       up_vector = up_vector / np.linalg.norm(up_vector)
+      up_vector = -up_vector
       # reward for being upright
 
       cosine_similarity = np.dot(up_vector, np.array([0, 0, 1]))
           
-      reward = z_goal_reward - distance_to_origin + cosine_similarity * 3
+      reward = z_goal_reward - distance_to_origin + cosine_similarity * 3 + healthy_reward
       #print("pos: ", base_link_pos[:2])
-      reward = xy_velocity[0] + xy_velocity[1]
       terminated = self.terminated
+      # terminate if robot falls over using up vector
+      terminated = terminated or cosine_similarity < 0.7
       observation = self._get_obs()
       # convert to event image
       observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
@@ -226,7 +229,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       if self.render_mode == "human":
           self.render()
       # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
-      return observation, reward, terminated, False, info  
+      return observation, reward, terminated, info  
     
     def get_event_image(self, img_in, timestamp, mode="esim"):
         if mode == "esim":
@@ -299,7 +302,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         obs = {}
         obs["state"] = self.data.qpos[:-7].flat.copy()
         obs["image"] = self.render()
-        obs["image_color"] = obs["image"]
+        #obs["image_color"] = obs["image"]
         #obs["overview_img"] = self.render(camera_id=1)
         return obs
 
