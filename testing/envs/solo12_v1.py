@@ -107,7 +107,6 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             obs_shape += 6
         if use_contact_forces:
             obs_shape += 12
-            # TODO: check what dimensions are correct for all obs_shapes defined for Solo12
         
         observation_space = Dict(
             {"state":
