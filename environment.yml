@@ -16,6 +16,7 @@ dependencies:
   - pip:
     - opencv-python
     - numpy==1.26.4
+    - ffmpeg==4.4.2
     - mujoco
     - scipy
     - torch
