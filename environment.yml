@@ -68,7 +68,6 @@ dependencies:
     - mediapy
     - natsort
     - networkx
-    - numpy
     - oauth2client
     - oauthlib
     - opencv-python
