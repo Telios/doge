@@ -188,21 +188,21 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       xy_velocity = (xy_position_after - xy_position_before) / self.dt
       self._time_elapsed += self.dt
 
-      FR_LOWER_LEG_pos = self.get_body_com("FR_LOWER_LEG")[:3]
-      FL_LOWER_LEG_pos = self.get_body_com("FL_LOWER_LEG")[:3]
-      HL_LOWER_LEG_pos = self.get_body_com("HL_LOWER_LEG")[:3]
-      HR_LOWER_LEG_pos = self.get_body_com("HR_LOWER_LEG")[:3]
+      FR_SHOULDER_pos = self.get_body_com("FR_SHOULDER")[:3]
+      FL_SHOULDER_pos = self.get_body_com("FL_SHOULDER")[:3]
+      HL_SHOULDER_pos = self.get_body_com("HL_SHOULDER")[:3]
+      HR_SHOULDER_pos = self.get_body_com("HR_SHOULDER")[:3]
       base_link_pos = self.get_body_com("base_link")[:3]
 
       z_goal_reward = 5 - np.abs(base_link_pos[2] - self._goal_z)
-      - np.abs(FR_LOWER_LEG_pos[2] - self._goal_z * 1.5) 
-      - np.abs(FL_LOWER_LEG_pos[2] - self._goal_z * 1.5)
-      - np.abs(HL_LOWER_LEG_pos[2] - self._goal_z * 1.5)
-      - np.abs(HR_LOWER_LEG_pos[2] - self._goal_z * 1.5)
+      - np.abs(FR_SHOULDER_pos[2] - self._goal_z) 
+      - np.abs(FL_SHOULDER_pos[2] - self._goal_z)
+      - np.abs(HL_SHOULDER_pos[2] - self._goal_z)
+      - np.abs(HR_SHOULDER_pos[2] - self._goal_z)
       distance_to_origin = np.linalg.norm(base_link_pos[:2])
 
       # get up vector from triangle spanned from the 4 legs
-      up_vector = np.cross(HL_LOWER_LEG_pos - HR_LOWER_LEG_pos, FR_LOWER_LEG_pos - HR_LOWER_LEG_pos)
+      up_vector = np.cross(HL_SHOULDER_pos - HR_SHOULDER_pos, FR_SHOULDER_pos - HR_SHOULDER_pos)
       up_vector = up_vector / np.linalg.norm(up_vector)
       up_vector = -up_vector
       # reward for being upright
@@ -216,7 +216,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       terminated = terminated or cosine_similarity < 0.7
       observation = self._get_obs()
       # convert to event image
-      observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
+      #observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
       info = {
             "reward_survive": healthy_reward,
             "reward": reward,
@@ -300,7 +300,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
     def _get_obs(self):
         obs = {}
         obs["state"] = self.data.qpos[:-7].flat.copy()
-        obs["image"] = self.render()
+        obs["image"] = self.render(camera_id=1)
         #obs["image_color"] = obs["image"]
         #obs["overview_img"] = self.render(camera_id=1)
         return obs
