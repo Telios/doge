@@ -41,11 +41,12 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             contact_cost_weight=5e-4,
             healthy_reward=1.0,
             terminate_when_unhealthy=True, # default True
-            healthy_z_range=(-0.35, 0.5),
+            healthy_z_range=(-0.3, 0.2),
             goal_z = -0.2,
             contact_force_range=(-1.0, 1.0),
             reset_noise_scale=0.1,
             exclude_current_positions_from_observation=True,
+            use_last_action=True,
             **kwargs,
     ):
         utils.EzPickle.__init__(
@@ -61,6 +62,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             contact_force_range,
             reset_noise_scale,
             exclude_current_positions_from_observation,
+            use_last_action,
             **kwargs,
             )
         
@@ -91,12 +93,33 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._ev_full = EventBuffer(1)
         self._ed = EventDisplay("Events", self._width, self._height, 2000)
         self._is_init = False
+        
+        self._scales = {
+            "joint_torque": -2.5e-3,
+            "joint_accel": -2.5e-7,
+            "action_rate": -0.01,
+            "feet_air_time": 0.2,
+        }
+        
+        self._state = {
+            "base_link_pos": np.zeros(3),
+            "base_link_quat": np.zeros(4),
+            "base_link_euler": np.zeros(3),
+            "FL_SHOULDER_pos": np.zeros(3),
+            "FR_SHOULDER_pos": np.zeros(3),
+            "HL_SHOULDER_pos": np.zeros(3),
+            "HR_SHOULDER_pos": np.zeros(3),
+            "last_action": np.zeros(12),
+            "torques": np.zeros(12),
+        }
 
         self._contact_force_range = contact_force_range
 
         self._reset_noise_scale = reset_noise_scale
 
         self._use_contact_forces = use_contact_forces
+        
+        self._use_last_action = use_last_action
 
         self._exclude_current_positions_from_observation = (
             exclude_current_positions_from_observation
@@ -106,6 +129,8 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         if not self._exclude_current_positions_from_observation:
             obs_shape += 6
         if use_contact_forces:
+            obs_shape += 12
+        if use_last_action:
             obs_shape += 12
         
         observation_space = Dict(
@@ -166,9 +191,12 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
     def is_healthy(self):
         state = self.get_body_com("base_link")
         min_z, max_z = self._healthy_z_range
-        #print(self.get_body_com("base_link")[:3])#
-        
-        is_healthy = np.isfinite(state).all() and min_z <= state[2] <= max_z
+        # determine if upright using euler angles
+        base_link_euler = self._state["base_link_euler"]
+        roll = base_link_euler[1]
+        pitch = base_link_euler[2]
+        is_upright = np.abs(pitch) < 0.5 and np.abs(roll) < 0.5
+        is_healthy = np.isfinite(state).all() and min_z <= state[2] <= max_z and is_upright
         return is_healthy
     
     @property
@@ -177,59 +205,57 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         time_up = self._time_elapsed >= self._time_limit
         return healthy or time_up or self.check_collision()
     
+    def update_state(self):
+        self._state["base_link_pos"] = self.get_body_com("base_link")[:3]
+        self._state["base_link_quat"] = self.data.body("base_link").xquat
+        self._state["base_link_euler"] = doge_utils.quat_to_euler(self._state["base_link_quat"])
+        self._state["FL_SHOULDER_pos"] = self.get_body_com("FL_SHOULDER")[:3]
+        self._state["FR_SHOULDER_pos"] = self.get_body_com("FR_SHOULDER")[:3]
+        self._state["HL_SHOULDER_pos"] = self.get_body_com("HL_SHOULDER")[:3]
+        self._state["HR_SHOULDER_pos"] = self.get_body_com("HR_SHOULDER")[:3]
+        self._state["torques"] = self.data.qfrc_actuator.flat.copy()
+        
     def step(self, action):
       self.apply_force()
-      healthy_reward = self.healthy_reward
-      # get velocity 
-      xy_position_before = self.get_body_com("base_link")[:2].copy()
       self.do_simulation(action, self.frame_skip)
+      self.update_state()
+      reward = self.calculate_reward(action)
+      
       timestamp_ns = time.time_ns() - self._time_start_ns
-      xy_position_after = self.get_body_com("base_link")[:2].copy()
-      xy_velocity = (xy_position_after - xy_position_before) / self.dt
       self._time_elapsed += self.dt
 
-      FR_SHOULDER_pos = self.get_body_com("FR_SHOULDER")[:3]
-      FL_SHOULDER_pos = self.get_body_com("FL_SHOULDER")[:3]
-      HL_SHOULDER_pos = self.get_body_com("HL_SHOULDER")[:3]
-      HR_SHOULDER_pos = self.get_body_com("HR_SHOULDER")[:3]
-      base_link_pos = self.get_body_com("base_link")[:3]
-
-      z_goal_reward = 5 - np.abs(base_link_pos[2] - self._goal_z)
-      - np.abs(FR_SHOULDER_pos[2] - self._goal_z) 
-      - np.abs(FL_SHOULDER_pos[2] - self._goal_z)
-      - np.abs(HL_SHOULDER_pos[2] - self._goal_z)
-      - np.abs(HR_SHOULDER_pos[2] - self._goal_z)
-      distance_to_origin = np.linalg.norm(base_link_pos[:2])
-
-      # get up vector from triangle spanned from the 4 legs
-      up_vector = np.cross(HL_SHOULDER_pos - HR_SHOULDER_pos, FR_SHOULDER_pos - HR_SHOULDER_pos)
-      up_vector = up_vector / np.linalg.norm(up_vector)
-      up_vector = -up_vector
-      # reward for being upright
-
-      cosine_similarity = np.dot(up_vector, np.array([0, 0, 1]))
-          
-      reward = z_goal_reward - distance_to_origin + cosine_similarity * 3 + healthy_reward
-      #print("pos: ", base_link_pos[:2])
       terminated = self.terminated
-      # terminate if robot falls over using up vector
-      terminated = terminated or cosine_similarity < 0.7
       observation = self._get_obs()
       # convert to event image
       #observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
       info = {
-            "reward_survive": healthy_reward,
             "reward": reward,
-            "xy_velocity": xy_velocity,
             "is_terminal": terminated,
             "time_elapsed": self._time_elapsed,
         }
       
-      if self.render_mode == "human":
-          self.render()
-      # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
+      self._state["last_action"] = action
+      
       return observation, reward, terminated, info  
     
+    def calculate_reward(self, action):
+        healthy_reward = self.healthy_reward * self.dt
+        z_goal_reward = 5 - np.abs(self._state["base_link_pos"][2] - self._goal_z)
+        - np.abs(self._state["FR_SHOULDER_pos"][2] - self._goal_z) 
+        - np.abs(self._state["FL_SHOULDER_pos"][2] - self._goal_z)
+        - np.abs(self._state["HL_SHOULDER_pos"][2] - self._goal_z)
+        - np.abs(self._state["HR_SHOULDER_pos"][2] - self._goal_z) 
+        z_goal_reward *= self.dt 
+        distance_to_origin = np.linalg.norm(self._state["base_link_pos"][:2]) * self.dt
+        
+        torque_regulizer = np.sqrt(np.sum(np.square(self._state["torques"]))) + np.sum(np.abs(self._state["torques"]))
+        action_regulizer = np.sum(np.square(action - self._state["last_action"]))
+        
+        torque_regulizer *= self.dt
+        action_regulizer *= self.dt
+        
+        return z_goal_reward - distance_to_origin + healthy_reward + self._scales["joint_torque"] * torque_regulizer + self._scales["action_rate"] * action_regulizer
+        
     def get_event_image(self, img_in, timestamp, mode="esim"):
         if mode == "esim":
             return self.get_event_image_esim(img_in, timestamp)
@@ -300,19 +326,12 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
     def _get_obs(self):
         obs = {}
         obs["state"] = self.data.qpos[:-7].flat.copy()
+        if self._use_last_action:
+            obs["state"] = np.concatenate([obs["state"], self._state["last_action"]])
         obs["image"] = self.render(camera_id=1)
         #obs["image_color"] = obs["image"]
         #obs["overview_img"] = self.render(camera_id=1)
         return obs
-
-        if self._exclude_current_positions_from_observation:
-            position = position[2:]
-
-        if self._use_contact_forces:
-            contact_forces = self.contact_forces.flat.copy()
-            return np.concatenate((position, velocity, contact_forces))
-        else:
-            return np.concatenate((position, velocity))
         
 
     def reset_model(self):
@@ -331,8 +350,8 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._force = doge_utils.calculate_force_vector(self.data.body('base_link').xpos, self._projectile.position())
 
         observation = self._get_obs()
-        timestamp_ns = time.time_ns() - self._time_start_ns
-        observation['image'] = self.get_event_image(observation['image'], timestamp_ns)
+        #timestamp_ns = time.time_ns() - self._time_start_ns
+        #observation['image'] = self.get_event_image(observation['image'], timestamp_ns)
 
         return observation
     
