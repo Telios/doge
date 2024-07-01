@@ -59,7 +59,7 @@ starttime = time.time_ns()
 while data.time < duration:
   if data.time % 5 < 0.2:
     resetted = False
-    projectile.apply_force(my_force)
+    projectile.apply_force(my_force, model, data)
   elif data.time % 5 > 0.3 and data.time % 5 < 0.4:
     projectile.reset_force()
   elif data.time % 5 > 4.0 and not resetted:
