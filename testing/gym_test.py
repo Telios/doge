@@ -17,7 +17,7 @@ video_writer = cv.VideoWriter("testing/videos/gym_dynamic_obstacles.avi", cv.Vid
 
 for i in tqdm(range(1000)):
     action = np.zeros(12)
-    obs, reward, terminated, truncated, info = env.step(action)
+    obs, reward, terminated, info = env.step(action)
     #print(info)
     # scale image
     image = cv.resize(obs["image"], (640, 640))

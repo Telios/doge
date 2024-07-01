@@ -4,6 +4,8 @@ import numpy as np
 from mujoco_object import MujocoObject
 import testing.doge_utils as doge_utils
 import torch, time, esim_torch
+import os
+os.environ['MUJOCO_GL'] = 'egl'
 import gymnasium as gym
 
 model = mujoco.MjModel.from_xml_path('./testing/assets/scene.xml')
