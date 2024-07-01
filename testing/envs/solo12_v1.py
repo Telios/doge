@@ -73,7 +73,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._terminate_when_unhealthy = terminate_when_unhealthy
         self._healthy_z_range = healthy_z_range
         self._goal_z = goal_z
-        self._time_limit = 2
+        self._time_limit = 3
         self._time_elapsed = 0
         self._time_start_ns = time.time_ns()
 
@@ -99,6 +99,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             "joint_accel": -2.5e-7,
             "action_rate": -0.01,
             "feet_air_time": 0.2,
+            "foot_slip": -0.1,
         }
         
         self._state = {
@@ -195,7 +196,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         base_link_euler = self._state["base_link_euler"]
         roll = base_link_euler[1]
         pitch = base_link_euler[2]
-        is_upright = np.abs(pitch) < 0.5 and np.abs(roll) < 0.5
+        is_upright = np.abs(pitch) < 0.8 and np.abs(roll) < 0.8
         is_healthy = np.isfinite(state).all() and min_z <= state[2] <= max_z and is_upright
         return is_healthy
     
@@ -315,7 +316,11 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
                 self._healthy_reward = 0
                 return True
         return False
-        
+    
+    def get_velocity_of_body(self, body_name):
+        id = self.data.body(body_name).id
+        velocities = self.data.qvel[id:id + 6]
+        return velocities
 
     def apply_force(self):
         if self.data.time < 0.2:
