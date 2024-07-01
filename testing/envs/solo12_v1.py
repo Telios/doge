@@ -39,7 +39,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             ctrl_cost_weight=0.5,
             use_contact_forces=False,
             contact_cost_weight=5e-4,
-            healthy_reward=1.0,
+            healthy_reward=100.0,
             terminate_when_unhealthy=True, # default True
             healthy_z_range=(-0.3, 0.2),
             goal_z = -0.2,
@@ -74,7 +74,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._healthy_z_range = healthy_z_range
         self._goal_z = goal_z
         self._time_limit = 24
-        self._time_reset = 3
+        self._time_reset = 2
         self._time_elapsed = 0
         self._time_start_ns = time.time_ns()
 
@@ -96,9 +96,9 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._is_init = False
         
         self._scales = {
-            "joint_torque": -0.25,
+            "joint_torque": -2.5e-2,
             "joint_accel": -2.5e-7,
-            "action_rate": -0.01,
+            "action_rate": -0.1,
             "feet_air_time": 0.2,
             "foot_slip": -0.1,
         }
@@ -229,7 +229,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       terminated = self.terminated
       observation = self._get_obs()
       # convert to event image
-      observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
+      #observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
       info = {
             "reward": reward,
             "is_terminal": terminated,
@@ -241,17 +241,18 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       # reset dynamic object after time_limit
       if self.data.time % self._time_reset < 0.02:
           # reset projectile to offset from base_link
-          offset = self._projectile.initial_pos[:3]
+          offset = self._projectile.initial_pos
           offset[0] += self._state["base_link_pos"][0]
           offset[1] += self._state["base_link_pos"][1]
           self._projectile.set_position_to(offset)
+          self._projectile.reset_force()
           self._force = doge_utils.calculate_force_vector(self.data.body('base_link').xpos, self._projectile.position())
       
       return observation, reward, terminated, info  
     
     def calculate_reward(self, action):
         healthy_reward = self.healthy_reward * self.dt
-        z_goal_reward = 5 - np.abs(self._state["base_link_pos"][2] - self._goal_z)
+        z_goal_reward = 100 - np.abs(self._state["base_link_pos"][2] - self._goal_z)
         - np.abs(self._state["FR_SHOULDER_pos"][2] - self._goal_z) 
         - np.abs(self._state["FL_SHOULDER_pos"][2] - self._goal_z)
         - np.abs(self._state["HL_SHOULDER_pos"][2] - self._goal_z)
@@ -322,27 +323,26 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         ball_id = self.model.body('projectile1').id
         for contact in self.data.contact:
             if self.model.geom_bodyid[contact.geom[0]] in body_ids and self.model.geom_bodyid[contact.geom[1]] == ball_id or self.model.geom_bodyid[contact.geom[1]] in body_ids and self.model.geom_bodyid[contact.geom[0]] == ball_id:
-                self._healthy_reward = 0
                 return True
         return False
     
     def get_velocity_of_body(self, body_name):
         id = self.data.body(body_name).id
-        velocities = self.data.qvel[id:id + 6]
+        velocities = self.data.qvel[id : id + 6]
         return velocities
 
     def apply_force(self):
         if self.data.time % self._time_reset < 0.2:
             self._projectile.apply_force(self._force, self.model, self.data)
         elif self.data.time % self._time_reset > 0.3 and self.data.time % self._time_reset < 0.4:
-            self._projectile.reset_force()
+            self.data.qfrc_applied = np.zeros(self.model.nv)
 
     def _get_obs(self):
         obs = {}
         obs["state"] = self.data.qpos[:-7].flat.copy()
         if self._use_last_action:
             obs["state"] = np.concatenate([obs["state"], self._state["last_action"]])
-        obs["image"] = self.render(camera_id=0)
+        obs["image"] = self.render(camera_id=1)
         #obs["image_color"] = obs["image"]
         #obs["overview_img"] = self.render(camera_id=1)
         return obs
@@ -361,11 +361,11 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         )
         self.set_state(qpos, qvel)
         self._force = doge_utils.calculate_force_vector(self.data.body('base_link').xpos, self._projectile.position())
-
+        
         observation = self._get_obs()
         timestamp_ns = time.time_ns() - self._time_start_ns
-        observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
-
+        #observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
+        
         return observation
     
     def reset(

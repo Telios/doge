@@ -17,8 +17,10 @@ class MujocoObject:
         mujoco.mj_applyFT(model, data, force, torque, point_on_body, self.bodyid, data.qfrc_applied)
     
     def reset_force(self):
-        self.data.qfrc_applied[:] = 0.0
-
+        self.data.qfrc_applied = np.zeros(self.model.nv)
+        self.data.qfrc_smooth[self.bodyid : self.bodyid + 6] = np.zeros(6)
+        self.data.qvel[self.bodyid : self.bodyid + 6] = np.zeros(6)
+        
     def velocity(self):
         velocity = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         mujoco.mj_objectVelocity(self.model, self.data, mujoco.mjtObj.mjOBJ_BODY, self.bodyid, velocity, True)
