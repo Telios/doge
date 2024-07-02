@@ -241,7 +241,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       # reset dynamic object after time_limit
       if self.data.time % self._time_reset < 0.02:
           # reset projectile to offset from base_link
-          offset = self._projectile.initial_pos
+          offset = np.array([3.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
           offset[0] += self._state["base_link_pos"][0]
           offset[1] += self._state["base_link_pos"][1]
           self._projectile.set_position_to(offset)
