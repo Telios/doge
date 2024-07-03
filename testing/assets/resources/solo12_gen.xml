@@ -30,6 +30,7 @@
   <worldbody>
     <!-- Robot base -->
     <body name="base_link">
+      <site name="imu" type='box' pos='0.15 0 0.05' />
       <camera name="front-camera" mode="fixed" pos="0.15 0 0.05" euler="1.57 -1.57 0"/>
       <camera name="track" mode= "trackcom" pos="0 -1.75 1.75" xyaxes="1 0 0 0 1 1"/>      
       <joint type="free"/>
@@ -320,4 +321,10 @@
     <exclude body1="HL_LOWER_LEG" body2="HL_UPPER_LEG"/>
     <exclude body1="HR_LOWER_LEG" body2="HR_UPPER_LEG"/>
   </contact>
+
+  <sensor>
+    <accelerometer name="accelerometer" site="imu" noise="1e-2" />
+    <gyro name="gyro" site="imu" noise="5e-4"/>
+  </sensor>
+
 </mujoco>

@@ -41,12 +41,13 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             contact_cost_weight=5e-4,
             healthy_reward=100.0,
             terminate_when_unhealthy=True, # default True
-            healthy_z_range=(-0.3, 0.2),
-            goal_z = -0.2,
+            healthy_z_range=(-0.3, 0.1),
+            goal_z = -0.139,
             contact_force_range=(-1.0, 1.0),
             reset_noise_scale=0.1,
             exclude_current_positions_from_observation=True,
             use_last_action=True,
+            use_imu_data=True,
             **kwargs,
     ):
         utils.EzPickle.__init__(
@@ -63,6 +64,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             reset_noise_scale,
             exclude_current_positions_from_observation,
             use_last_action,
+            use_imu_data,
             **kwargs,
             )
         
@@ -95,12 +97,18 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._ed = EventDisplay("Events", self._width, self._height, 2000)
         self._is_init = False
         
+        self._home_position = np.array([0.157, 0.22, -1.0, -0.157, 0.22, -1.0, 0.157, -0.22, 1.0, -0.157, -0.22, 1.0])
+        
+        self._action_damping = 0.3
+        
         self._scales = {
             "joint_torque": -2.5e-2,
             "joint_accel": -2.5e-7,
             "action_rate": -0.1,
             "feet_air_time": 0.2,
             "foot_slip": -0.1,
+            "velocity": -0.5,
+            "heading": -0.1,
         }
         
         self._state = {
@@ -113,6 +121,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             "HR_SHOULDER_pos": np.zeros(3),
             "last_action": np.zeros(12),
             "torques": np.zeros(12),
+            "imu": np.zeros(6),
         }
 
         self._contact_force_range = contact_force_range
@@ -122,6 +131,8 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._use_contact_forces = use_contact_forces
         
         self._use_last_action = use_last_action
+        
+        self._use_imu_data = use_imu_data
 
         self._exclude_current_positions_from_observation = (
             exclude_current_positions_from_observation
@@ -134,6 +145,8 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             obs_shape += 12
         if use_last_action:
             obs_shape += 12
+        if use_imu_data:
+            obs_shape += 6
         
         observation_space = Dict(
             {"state":
@@ -216,12 +229,15 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._state["HL_SHOULDER_pos"] = self.get_body_com("HL_SHOULDER")[:3]
         self._state["HR_SHOULDER_pos"] = self.get_body_com("HR_SHOULDER")[:3]
         self._state["torques"] = self.data.qfrc_actuator.flat.copy()
+        self._state["imu"] = self.data.sensordata
+        self._state["base_link_vel"] = self.get_velocity_of_body("base_link")
         
     def step(self, action):
       self.apply_force()
-      self.do_simulation(action, self.frame_skip)
+      damped_action = self._home_position + action * self._action_damping
+      self.do_simulation(damped_action, self.frame_skip)
       self.update_state()
-      reward = self.calculate_reward(action)
+      reward = self.calculate_reward(damped_action)
       
       timestamp_ns = time.time_ns() - self._time_start_ns
       self._time_elapsed += self.dt
@@ -229,14 +245,14 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       terminated = self.terminated
       observation = self._get_obs()
       # convert to event image
-      #observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
+      observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
       info = {
             "reward": reward,
             "is_terminal": terminated,
             "time_elapsed": self._time_elapsed,
         }
       
-      self._state["last_action"] = action
+      self._state["last_action"] = damped_action
 
       # reset dynamic object after time_limit
       if self.data.time % self._time_reset < 0.02:
@@ -262,11 +278,15 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         
         torque_regulizer = np.sqrt(np.sum(np.square(self._state["torques"]))) + np.sum(np.abs(self._state["torques"]))
         action_regulizer = np.sum(np.square(action - self._state["last_action"]))
+        velocity_regulizer = np.sum(np.square(self._state["base_link_vel"]))
         
         torque_regulizer *= self.dt
         action_regulizer *= self.dt
+        velocity_regulizer *= self.dt
         
-        return z_goal_reward - distance_to_origin + healthy_reward + self._scales["joint_torque"] * torque_regulizer + self._scales["action_rate"] * action_regulizer
+        heading_regulizer = np.square(np.abs(self._state["base_link_euler"][0]) - np.pi)
+        
+        return z_goal_reward - distance_to_origin + healthy_reward + self._scales["joint_torque"] * torque_regulizer + self._scales["action_rate"] * action_regulizer + self._scales["velocity"] * velocity_regulizer + self._scales["heading"] * heading_regulizer
         
     def get_event_image(self, img_in, timestamp, mode="esim"):
         if mode == "esim":
@@ -339,10 +359,12 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
 
     def _get_obs(self):
         obs = {}
-        obs["state"] = self.data.qpos[:-7].flat.copy()
+        obs["state"] = self.data.qpos[:-7].flat.copy() 
         if self._use_last_action:
             obs["state"] = np.concatenate([obs["state"], self._state["last_action"]])
-        obs["image"] = self.render(camera_id=1)
+        if self._use_imu_data:
+            obs["state"] = np.concatenate([obs["state"], self._state["imu"]])
+        obs["image"] = self.render(camera_id=0)
         #obs["image_color"] = obs["image"]
         #obs["overview_img"] = self.render(camera_id=1)
         return obs
@@ -364,7 +386,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         
         observation = self._get_obs()
         timestamp_ns = time.time_ns() - self._time_start_ns
-        #observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
+        observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
         
         return observation
     
