@@ -1,5 +1,5 @@
 <mujoco model="solo_12_scene">
-  <include file="resources/solo12_gen.xml"/>
+  <include file="resources/solo12_gen2.xml"/>
 
   <visual>
     <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
