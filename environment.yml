@@ -14,7 +14,12 @@ dependencies:
   - torchaudio
   - pytorch-cuda=12.1
   - ffmpeg=4.4.2
+  - pinocchio
   - pip:
+    - odri-control-interface
+    - qtm
+    - inputs
+    - pybullet
     - opencv-python
     - numpy==1.26.4
     - mujoco

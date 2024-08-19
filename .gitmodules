@@ -7,3 +7,6 @@
 [submodule "external/IEBCS"]
 	path = external/IEBCS
 	url = https://github.com/Telios/IEBCS.git
+[submodule "external/quadruped-rl"]
+	path = external/quadruped-rl
+	url = https://github.com/Telios/quadruped-rl
