@@ -17,7 +17,7 @@
       <!-- TODO: Tweak these -->
       <position kp="15" ctrlrange="-3.14 3.14" forcerange="-10 10"/>
     </default>
-    <joint type="hinge" damping="1" frictionloss="0.1"/>
+    <joint type="hinge" damping="1"/>
   </default>
   
   <!-- Collision / visual meshes used during the simulation -->

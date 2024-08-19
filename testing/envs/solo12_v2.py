@@ -4,7 +4,7 @@ from gymnasium import utils
 from gymnasium.envs.mujoco import MujocoEnv
 from gymnasium.spaces import Box, Dict
 import torch, esim_torch, time
-import cv2 as cv
+import math
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
@@ -39,15 +39,16 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             ctrl_cost_weight=0.5,
             use_contact_forces=False,
             contact_cost_weight=5e-4,
-            healthy_reward=5.0,
+            healthy_reward=100.0,
             terminate_when_unhealthy=True, # default True
             healthy_z_range=(-0.3, 0.1),
             goal_z = -0.139,
             contact_force_range=(-1.0, 1.0),
-            reset_noise_scale=0.01,
+            reset_noise_scale=0.1,
             exclude_current_positions_from_observation=True,
             use_last_action=True,
             use_imu_data=True,
+            use_command=True,
             **kwargs,
     ):
         utils.EzPickle.__init__(
@@ -65,6 +66,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             exclude_current_positions_from_observation,
             use_last_action,
             use_imu_data,
+            use_command,
             **kwargs,
             )
         
@@ -76,25 +78,12 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._healthy_z_range = healthy_z_range
         self._goal_z = goal_z
         self._time_limit = 24
-        self._time_reset = 1
+        self._time_reset = 2
         self._time_elapsed = 0
         self._time_start_ns = time.time_ns()
 
         self.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self._esim = esim_torch.ESIM(
-            contrast_threshold_neg=0.2,
-            contrast_threshold_pos=0.2,
-            refractory_period_ns=0,
-        )
-
-        self._width = 64
-        self._height = 64
-        dsi.initSimu(self._height, self._width)
-        dsi.initLatency(200, 50, 50, 300)
-        dsi.initContrast(0.3, 0.3, 0.05)
-        init_bgn_hist_cpp(f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy", f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy")
-        self._ev_full = EventBuffer(1)
-        self._ed = EventDisplay("Events", self._width, self._height, 2000)
+        
         self._is_init = False
         
         self._home_position = np.array([0.157, 0.22, -1.0, -0.157, 0.22, -1.0, 0.157, -0.22, 1.0, -0.157, -0.22, 1.0])
@@ -109,6 +98,14 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             "foot_slip": -0.1,
             "velocity": -0.5,
             "heading": -0.1,
+            "tracking_sigma": 0.25,
+            "tracking_lin_vel": 1.5,
+            "tracking_ang_vel": 0.8,
+            "lin_vel_z": -2.0,
+            "ang_vel_z": -0.05,
+            "orientation": -5.0,
+            "stand_still": -0.5,
+            "termination": -1.0,
         }
         
         self._state = {
@@ -122,6 +119,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             "last_action": np.zeros(12),
             "torques": np.zeros(12),
             "imu": np.zeros(6),
+            "command": np.zeros(3),
         }
 
         self._contact_force_range = contact_force_range
@@ -134,6 +132,8 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         
         self._use_imu_data = use_imu_data
 
+        self._use_command = use_command
+        
         self._exclude_current_positions_from_observation = (
             exclude_current_positions_from_observation
         )
@@ -147,6 +147,8 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             obs_shape += 12
         if use_imu_data:
             obs_shape += 6
+        if use_command:
+            obs_shape += 3
         
         observation_space = Dict(
             {"state":
@@ -156,13 +158,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             shape=(obs_shape,),
             dtype=np.float64,
         ),
-            "image":
-            Box(
-            low=0,
-            high=255,
-            shape=(64, 64, 3),
-            dtype=np.uint8,
-            ),}
+            }
         )
 
         MujocoEnv.__init__(
@@ -174,10 +170,6 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             default_camera_config=DEFAULT_CAMERA_CONFIG,
             **kwargs,
         )
-
-        self._projectile = MujocoObject(self.model, self.data, 'projectile1')
-
-        self._force = doge_utils.calculate_force_vector(self.data.body('base_link').xpos, self._projectile.position())
 
     @property
     def healthy_reward(self):
@@ -211,12 +203,6 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         roll = base_link_euler[1]
         pitch = base_link_euler[2]
         is_upright = np.abs(pitch) < 0.8 and np.abs(roll) < 0.8
-        if not is_upright:
-            print("Not upright")
-        if not np.isfinite(state).all():
-            print("Not finite")
-        if not min_z <= state[2] <= max_z:
-            print("Z not in range")
         is_healthy = np.isfinite(state).all() and min_z <= state[2] <= max_z and is_upright
         return is_healthy
     
@@ -224,8 +210,22 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
     def terminated(self):
         healthy = not self.is_healthy if self._terminate_when_unhealthy else False
         time_up = self._time_elapsed >= self._time_limit
-        return healthy or time_up or self.check_collision()
+        return healthy or time_up
     
+    def sample_command(self):
+        lin_vel_x = [-0.6, 1.5] # min max [m/s]
+        lin_vel_y = [-0.8, 0.8] # min max [m/s]
+        ang_vel_yaw = [-0.7, 0.7] # min max [rad/s]
+        
+        lin_vel_x = np.random.uniform(lin_vel_x[0], lin_vel_x[1])
+        
+        lin_vel_y = np.random.uniform(lin_vel_y[0], lin_vel_y[1])
+        
+        ang_vel_yaw = np.random.uniform(ang_vel_yaw[0], ang_vel_yaw[1])
+        
+        new_command = np.array([lin_vel_x, lin_vel_y, ang_vel_yaw])
+        return new_command
+        
     def update_state(self):
         self._state["base_link_pos"] = self.get_body_com("base_link")[:3]
         self._state["base_link_quat"] = self.data.body("base_link").xquat
@@ -239,22 +239,15 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._state["base_link_vel"] = self.get_velocity_of_body("base_link")
         
     def step(self, action):
-      self.apply_force()
       damped_action = self._home_position + action * self._action_damping
       self.do_simulation(damped_action, self.frame_skip)
       self.update_state()
       reward = self.calculate_reward(damped_action)
       
-      timestamp_ns = time.time_ns() - self._time_start_ns
       self._time_elapsed += self.dt
-
-      velocity_reg = np.sum(np.square(self.get_velocity_of_body("base_link"))) * self.dt
-      print(self._state["base_link_euler"])
 
       terminated = self.terminated
       observation = self._get_obs()
-      # convert to event image
-      observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
       info = {
             "reward": reward,
             "is_terminal": terminated,
@@ -262,18 +255,6 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         }
       
       self._state["last_action"] = damped_action
-
-      # reset dynamic object after time_limit
-      if self.data.time % self._time_reset < 0.02:
-          # reset projectile to offset from base_link
-          offset = np.array([3.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
-          offset = np.array([3.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
-          offset[0] += self._state["base_link_pos"][0]
-          offset[1] += self._state["base_link_pos"][1]
-          self._projectile.reset_force()
-          self._projectile.set_position_to(offset)
-          self._projectile.reset_force()
-          self._force = doge_utils.calculate_force_vector(self.data.body('base_link').xpos, self._projectile.position())
       
       return observation, reward, terminated, info  
     
@@ -285,7 +266,13 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         - np.abs(self._state["HL_SHOULDER_pos"][2] - self._goal_z)
         - np.abs(self._state["HR_SHOULDER_pos"][2] - self._goal_z) 
         z_goal_reward *= self.dt 
-        distance_to_origin = np.linalg.norm(self._state["base_link_pos"][:2]) * self.dt
+        
+        lin_vel_err = np.sum(np.abs(self._state["command"][:2] - self._state["base_link_vel"][:2]))
+        lin_vel_reward = np.exp(-lin_vel_err / self._scales["tracking_sigma"]) * self.dt
+        
+        ang_vel_err = np.abs(self._state["command"][2] - self._state["base_link_vel"][5])
+        ang_vel_reward = np.exp(-ang_vel_err / self._scales["tracking_sigma"]) * self.dt
+        
         
         torque_regulizer = np.sqrt(np.sum(np.square(self._state["torques"]))) + np.sum(np.abs(self._state["torques"]))
         action_regulizer = np.sum(np.square(action - self._state["last_action"]))
@@ -295,57 +282,10 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         action_regulizer *= self.dt
         velocity_regulizer *= self.dt
         
-        heading_regulizer = np.square(np.abs(self._state["base_link_euler"][0]) - np.pi)
-        
-        return z_goal_reward - distance_to_origin + healthy_reward + self._scales["joint_torque"] * torque_regulizer + self._scales["action_rate"] * action_regulizer + self._scales["velocity"] * velocity_regulizer + self._scales["heading"] * heading_regulizer
-        
-    def get_event_image(self, img_in, timestamp, mode="esim"):
-        if mode == "esim":
-            return self.get_event_image_esim(img_in, timestamp)
-        elif mode == "iebcs":
-            return self.get_event_image_iebcs(img_in)
-        else:
-            return self.get_event_image_esim(img_in, timestamp)
-        
-    def get_event_image_esim(self, img_in, timestamp):
-        img = cv.cvtColor(img_in, cv.COLOR_RGB2GRAY)
-        img = np.log(img.astype("float32") / 255 + 1e-4)
-        img = torch.from_numpy(img).to(self.DEVICE)
-        timestamp = torch.tensor([timestamp], device=self.DEVICE, dtype=torch.int64)
-
-        events = self._esim.forward(img, torch.tensor([timestamp], device=self.DEVICE))
-        if events is None:
-            # return white image with the same size as the input image
-            return np.ones((img_in.shape[0], img_in.shape[1], 3), dtype=np.uint8) * 255
-        image_color = torch.stack([img, img, img], -1)
-        image_color[:,:,:] = 255
-        image_color[events['y'], events['x'], :] = 0
-        image_color[events['y'], events['x'], events['p']] = 200
-
-        image_color[:,:,0] = image_color[:,:,1]
-        image_color = image_color.cpu().numpy()
-        image_color = image_color.astype(np.uint8)
-        return image_color
-    
-    def get_event_image_iebcs(self, img_in):
-        dt = 1000
-        if img_in is None:
-            return
-        img = cv.cvtColor(img_in, cv.COLOR_RGB2LUV)[:, :, 0]
-        if not self._is_init:
-            dsi.initImg(img)
-            self._is_init = True
-        else:
-            buf = dsi.updateImg(img, dt)
-            ev = EventBuffer(1)
-            ev.add_array(np.array(buf["ts"], dtype=np.uint64),
-                            np.array(buf["x"], dtype=np.uint16),
-                            np.array(buf["y"], dtype=np.uint16),
-                            np.array(buf["p"], dtype=np.uint64),
-                            100000000)
-            self._ed.update(ev, dt)
-            self._ev_full.increase_ev(ev)
-        return self._ed.im
+        reward = z_goal_reward + self._scales["tracking_lin_vel"] * lin_vel_reward + self._scales["tracking_ang_vel"] * ang_vel_reward + healthy_reward + self._scales["joint_torque"] * torque_regulizer + self._scales["action_rate"] * action_regulizer + self._scales["velocity"] * velocity_regulizer
+        reward = np.clip(reward, 0.0, 10000.0)
+        return reward
+   
 
     def check_collision(self):
         # get ids for all solo12 geometries
@@ -362,13 +302,6 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         velocities = self.data.qvel[id : id + 6]
         return velocities
 
-    def apply_force(self):
-        if self.data.time % self._time_reset < 0.2:
-            self._projectile.apply_force(self._force, self.model, self.data)
-        elif self.data.time % self._time_reset > 0.3 and self.data.time % self._time_reset < 0.4:
-            self.data.qfrc_applied = np.zeros(self.model.nv)
-            self.data.qfrc_applied = np.zeros(self.model.nv)
-
     def _get_obs(self):
         obs = {}
         obs["state"] = self.data.qpos[:-7].flat.copy() 
@@ -376,9 +309,8 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             obs["state"] = np.concatenate([obs["state"], self._state["last_action"]])
         if self._use_imu_data:
             obs["state"] = np.concatenate([obs["state"], self._state["imu"]])
-        obs["image"] = self.render(camera_id=0)
-        obs["image_color"] = obs["image"]
-        obs["overview_img"] = self.render(camera_id=1)
+        if self._use_command:
+            obs["state"] = np.concatenate([obs["state"], self._state["command"]])
         return obs
         
     def reset_model(self):
@@ -388,19 +320,17 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         qpos = self.init_qpos[:-7] + self.np_random.uniform(
             low=noise_low, high=noise_high, size=self.model.nq - 7
         )
-        qpos = np.append(qpos, self._projectile.get_random_reset_pos())
+        qpos = np.concatenate([qpos, np.array([3.0, 0, 100.0, 1.0, 0.0, 0.0, 0.0])])
         qvel = (
             self.init_qvel
             + self._reset_noise_scale * self.np_random.standard_normal(self.model.nv)
         )
         self.set_state(qpos, qvel)
-        self._force = doge_utils.calculate_force_vector(self.data.body('base_link').xpos, self._projectile.position())
+        
+        self._state["command"] = self.sample_command()
         
         observation = self._get_obs()
-        timestamp_ns = time.time_ns() - self._time_start_ns
-        self._healthy_reward = 5.0
-        #observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
-
+        
         return observation
     
     def reset(
