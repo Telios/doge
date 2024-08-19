@@ -28,7 +28,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(DEVICE)
 duration = 20
 framerate = 30
-save_video = True
+save_video = False
 my_force = doge_utils.calculate_force_vector(data.body('base_link').xpos, projectile.position())
 
 scene_option = mujoco.MjvOption()

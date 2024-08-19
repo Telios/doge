@@ -13,11 +13,13 @@ dependencies:
   - torchvision
   - torchaudio
   - pytorch-cuda=12.1
+  - ffmpeg=4.4.2
   - pip:
     - opencv-python
     - numpy==1.26.4
-    - ffmpeg==4.4.2
     - mujoco
+    - mujoco_mjx
+    - brax
     - scipy
     - torch
     - gymnasium[all]

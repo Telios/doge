@@ -39,12 +39,12 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
             ctrl_cost_weight=0.5,
             use_contact_forces=False,
             contact_cost_weight=5e-4,
-            healthy_reward=1.0,
+            healthy_reward=5.0,
             terminate_when_unhealthy=True, # default True
             healthy_z_range=(-0.3, 0.2),
             goal_z = -0.2,
             contact_force_range=(-1.0, 1.0),
-            reset_noise_scale=0.1,
+            reset_noise_scale=0.01,
             exclude_current_positions_from_observation=True,
             use_last_action=True,
             **kwargs,
@@ -74,7 +74,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         self._healthy_z_range = healthy_z_range
         self._goal_z = goal_z
         self._time_limit = 24
-        self._time_reset = 3
+        self._time_reset = 1
         self._time_elapsed = 0
         self._time_start_ns = time.time_ns()
 
@@ -90,7 +90,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         dsi.initSimu(self._height, self._width)
         dsi.initLatency(200, 50, 50, 300)
         dsi.initContrast(0.3, 0.3, 0.05)
-        init_bgn_hist_cpp(f"{os.getcwd()}/../external/IEBCS/data/noise_pos_161lux.npy", f"{os.getcwd()}/../external/IEBCS/data/noise_pos_161lux.npy")
+        init_bgn_hist_cpp(f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy", f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy")
         self._ev_full = EventBuffer(1)
         self._ed = EventDisplay("Events", self._width, self._height, 2000)
         self._is_init = False
@@ -198,6 +198,12 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         roll = base_link_euler[1]
         pitch = base_link_euler[2]
         is_upright = np.abs(pitch) < 0.8 and np.abs(roll) < 0.8
+        if not is_upright:
+            print("Not upright")
+        if not np.isfinite(state).all():
+            print("Not finite")
+        if not min_z <= state[2] <= max_z:
+            print("Z not in range")
         is_healthy = np.isfinite(state).all() and min_z <= state[2] <= max_z and is_upright
         return is_healthy
     
@@ -226,6 +232,9 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       timestamp_ns = time.time_ns() - self._time_start_ns
       self._time_elapsed += self.dt
 
+      velocity_reg = np.sum(np.square(self.get_velocity_of_body("base_link"))) * self.dt
+      print(self._state["base_link_euler"])
+
       terminated = self.terminated
       observation = self._get_obs()
       # convert to event image
@@ -241,9 +250,10 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
       # reset dynamic object after time_limit
       if self.data.time % self._time_reset < 0.02:
           # reset projectile to offset from base_link
-          offset = self._projectile.initial_pos[:3]
+          offset = np.array([3.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
           offset[0] += self._state["base_link_pos"][0]
           offset[1] += self._state["base_link_pos"][1]
+          self._projectile.reset_force()
           self._projectile.set_position_to(offset)
           self._force = doge_utils.calculate_force_vector(self.data.body('base_link').xpos, self._projectile.position())
       
@@ -335,7 +345,7 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         if self.data.time % self._time_reset < 0.2:
             self._projectile.apply_force(self._force, self.model, self.data)
         elif self.data.time % self._time_reset > 0.3 and self.data.time % self._time_reset < 0.4:
-            self._projectile.reset_force()
+            self.data.qfrc_applied = np.zeros(self.model.nv)
 
     def _get_obs(self):
         obs = {}
@@ -343,8 +353,8 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
         if self._use_last_action:
             obs["state"] = np.concatenate([obs["state"], self._state["last_action"]])
         obs["image"] = self.render(camera_id=0)
-        #obs["image_color"] = obs["image"]
-        #obs["overview_img"] = self.render(camera_id=1)
+        obs["image_color"] = obs["image"]
+        obs["overview_img"] = self.render(camera_id=1)
         return obs
         
     def reset_model(self):
@@ -364,7 +374,8 @@ class Solo12Env(MujocoEnv, utils.EzPickle):
 
         observation = self._get_obs()
         timestamp_ns = time.time_ns() - self._time_start_ns
-        observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
+        self._healthy_reward = 5.0
+        #observation['image'] = self.get_event_image(observation['image'], timestamp_ns, mode="iebcs")
 
         return observation
     

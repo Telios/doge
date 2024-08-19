@@ -7,8 +7,8 @@ import cv2 as cv
 
 env = Solo12Env(xml_file="~/victor/doge/testing/assets/scene.xml",
                 render_mode="rgb_array",
-                width=128,
-                height=128)
+                width=64,
+                height=64)
 obs = env.reset()
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -16,9 +16,9 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 video_writer = cv.VideoWriter("testing/videos/gym_dynamic_obstacles.avi", cv.VideoWriter_fourcc(*"XVID"), 30, (640*3, 640))
 
 for i in tqdm(range(1000)):
-    action = np.zeros(12)
+    action = np.random.uniform(-3, 3, 12)
     obs, reward, terminated, info = env.step(action)
-    #print(info)
+    #print(env.get_body_com("base_link")[2])
     # scale image
     image = cv.resize(obs["image"], (640, 640))
     image_color = cv.resize(obs["image_color"], (640, 640))

@@ -16,7 +16,7 @@
   <worldbody>
     <body name="projectile1" pos="3 0 0">
       <joint name="joint1" type="free"/>
-      <geom name="geom1" type="sphere" size="0.10" rgba="0.8 0.2 0.2 1"/>
+      <geom name="geom1" type="sphere" size="0.1" rgba="0.8 0.2 0.2 1"/>
       <inertial pos="0 0 0" mass="3" diaginertia="0.0001 0.0001 0.0001"/>
     </body>
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>

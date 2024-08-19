@@ -11,13 +11,16 @@ class MujocoObject:
         self.data = data
         self.bodyname = bodyname
         self.bodyid = model.body(bodyname).id
+        self.initial_pos = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0])
         self.set_initial_pos()
     
     def apply_force(self, force, model, data, torque=np.array([0.0, 0.0, 0.0]), point_on_body=np.array([0.0, 0.0, 0.0])):
         mujoco.mj_applyFT(model, data, force, torque, point_on_body, self.bodyid, data.qfrc_applied)
     
     def reset_force(self):
-        self.data.qfrc_applied[:] = 0.0
+        self.data.qfrc_applied = np.zeros(self.model.nv)
+        self.data.qfrc_smooth[self.bodyid : self.bodyid + 6] = np.zeros(6)
+        self.data.qvel[self.bodyid : self.bodyid + 6] = np.zeros(6)
 
     def velocity(self):
         velocity = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
@@ -28,7 +31,8 @@ class MujocoObject:
         return self.data.qpos[self.bodyid + 1 : self.bodyid + 8] # [x, y, z, qw, qx, qy, qz]
     
     def set_initial_pos(self):
-        self.initial_pos = copy.deepcopy(self.position())
+        print(f'Initial position of {self.bodyname}: {self.position_string(self.position())}')
+        self.initial_pos[0:7] = self.position()[0:7]
         self.initial_pos_all = copy.deepcopy(self.data.qpos)
 
     def set_rotation(self, euler):
