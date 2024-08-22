@@ -29,7 +29,7 @@ class Solo12Env(gym.Env):
 
         self.action_space = Box(low=-1.0, high=1.0, shape=(3,)) # vx, vy, vz
         self.observation_space = Dict({
-            "state": Box(low=-np.inf, high=np.inf, shape=(18,), dtype=np.float32), # 12 joint positions, 6 imu readings
+            "state": Box(low=-np.inf, high=np.inf, shape=(18,), dtype=np.float64), # 12 joint positions, 6 imu readings
             "image": Box(low=0, high=255, shape=(render_height, render_width, 3), dtype=np.uint8)
         })
         
@@ -52,7 +52,7 @@ class Solo12Env(gym.Env):
                       q_init=self.params.q_init,
                       envID=0,
                       use_flat_plane=True,
-                      enable_pyb_GUI=True,
+                      enable_pyb_GUI=False,
                       dt=self.params.dt,
                       alpha=self.params.alpha)
         
@@ -236,15 +236,15 @@ class Solo12Env(gym.Env):
         return obs
 
 if __name__ == "__main__":
-    show_frame = True
+    show_frame = False
     env = Solo12Env()
     start = time.time()
     for j in range(1000):
         obs, reward, terminated, info = env.step([0.0, 0.0, 0.0])
-        frame = env.render()
         if terminated:
             env.reset()
         if show_frame:
+            frame = env.render()
             bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             cv2.imshow("frame", bgr_frame)
             cv2.waitKey(1)
