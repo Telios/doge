@@ -21,18 +21,23 @@ class Solo12Env(gym.Env):
                  terminate_when_unhealthy=True,
                  reset_noise_scale=0.1,
                  render_width=64,
-                 render_height=64
+                 render_height=64,
+                 max_steps=500,
                  ):
         self.healthy_reward = healthy_reward
+        self.step_counter = 0
+
         self.action_space = Box(low=-1.0, high=1.0, shape=(3,)) # vx, vy, vz
         self.observation_space = Dict({
             "state": Box(low=-np.inf, high=np.inf, shape=(18,), dtype=np.float32), # 12 joint positions, 6 imu readings
             "image": Box(low=0, high=255, shape=(render_height, render_width, 3), dtype=np.uint8)
         })
+        
         self.terminate_when_unhealthy = terminate_when_unhealthy
         self.reset_noise_scale = reset_noise_scale
         self.render_width = render_width
         self.render_height = render_height
+        self.max_steps = max_steps
 
         aspect = render_width / render_height
         self.projection_matrix = p.computeProjectionMatrixFOV(
@@ -171,6 +176,14 @@ class Solo12Env(gym.Env):
         info["is_terminal"] = terminated
         info["base_link_pos"] = self.device.baseState[0]
         info["reward"] = reward
+        info["step"] = self.step_counter
+
+        if self.step_counter % 100 == 0:
+            self._reset_and_apply_force_projectile()
+
+        self.step_counter += 1
+        if self.step_counter >= self.max_steps:
+            terminated = True
 
         return obs, reward, terminated, info
         
@@ -203,22 +216,34 @@ class Solo12Env(gym.Env):
         return frame
 
     def close(self):
-        pass
+        self.device.Stop()
+
+    def _reset_and_apply_force_projectile(self):
+        y_noise = np.random.uniform(-1, 1)
+        xy_offset = self.device.baseState[0][:2]
+        p.resetBasePositionAndOrientation(self.sphereId1, [3.0 + xy_offset[0], y_noise + xy_offset[1], 0.1], [0, 0, 0, 1])
+        p.resetBaseVelocity(self.sphereId1, linearVelocity=[-5.5, -(xy_offset[1] + y_noise) * 1.3, 3.0])
 
     def _reset_model(self):
-        pass
+        z_reset = 0.3
+        p.resetBasePositionAndOrientation(self.robotId, [0.0, 0.0, z_reset], [0, 0, 0, 1])
+
+        return self._get_obs()
 
     def reset(self):
-        pass
+        self.step_counter = 0
+        obs = self._reset_model()
+        return obs
 
 if __name__ == "__main__":
     show_frame = True
     env = Solo12Env()
-    env.reset()
     start = time.time()
-    for _ in range(1000):
-        obs, reward, terminated, info = env.step([1.0, 0.0, 0.0])
+    for j in range(1000):
+        obs, reward, terminated, info = env.step([0.0, 0.0, 0.0])
         frame = env.render()
+        if terminated:
+            env.reset()
         if show_frame:
             bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             cv2.imshow("frame", bgr_frame)
