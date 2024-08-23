@@ -31,7 +31,7 @@ class Solo12Env(gym.Env):
         self.healthy_reward = healthy_reward
         self.step_counter = 0
 
-        self.action_space = Box(low=-1.0, high=1.0, shape=(3,)) # vx, vy, vz
+        self.action_space = Box(low=-1.6, high=1.6, shape=(3,)) # vx, vy, vz
         self.observation_space = Dict({
             "state": Box(low=-np.inf, high=np.inf, shape=(18,), dtype=np.float64), # 12 joint positions, 6 imu readings
             "image": Box(low=0, high=255, shape=(render_height, render_width, 3), dtype=np.uint8)
@@ -73,12 +73,12 @@ class Solo12Env(gym.Env):
             contrast_threshold_pos=0.2,
             refractory_period_ns=0,
         )
-        dsi.initSimu(self._height, self._width)
+        dsi.initSimu(self.render_height, self.render_width)
         dsi.initLatency(200, 50, 50, 300)
         dsi.initContrast(0.3, 0.3, 0.05)
         init_bgn_hist_cpp(f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy", f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy")
         self._ev_full = EventBuffer(1)
-        self._ed = EventDisplay("Events", self._width, self._height, 2000)
+        self._ed = EventDisplay("Events", self.render_width, self.render_height, 2000)
         self._is_init = False
 
     def _initialize_policy(self):
