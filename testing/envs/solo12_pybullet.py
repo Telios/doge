@@ -3,7 +3,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import utils
 from gymnasium.spaces import Box, Dict
-import torch, time, math, sys, os
+import torch, esim_torch, time, math, sys, os
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
 from external.quadruped_rl.PyBulletSimulator import PyBulletSimulator
 from external.quadruped_rl.Params import RLParams
@@ -11,8 +11,12 @@ from external.quadruped_rl.cpuMLP import Interface
 from testing import doge_utils
 from pybullet_utils import bullet_client
 import pybullet as p
-import cv2
+import cv2 as cv
 import pybullet_data
+from external.IEBCS.src.event_buffer import EventBuffer
+from external.IEBCS.src.dvs_sensor import init_bgn_hist_cpp
+from external.IEBCS.src.event_display import EventDisplay
+import dsi
 
 
 class Solo12Env(gym.Env):
@@ -60,8 +64,22 @@ class Solo12Env(gym.Env):
         
         self._initialize_policy()
         self._initialize_dynamic_objects()
-
+        self._initialize_event_sim()
         
+    def _initialize_event_sim(self):
+        self.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self._esim = esim_torch.ESIM(
+            contrast_threshold_neg=0.2,
+            contrast_threshold_pos=0.2,
+            refractory_period_ns=0,
+        )
+        dsi.initSimu(self._height, self._width)
+        dsi.initLatency(200, 50, 50, 300)
+        dsi.initContrast(0.3, 0.3, 0.05)
+        init_bgn_hist_cpp(f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy", f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy")
+        self._ev_full = EventBuffer(1)
+        self._ed = EventDisplay("Events", self._width, self._height, 2000)
+        self._is_init = False
 
     def _initialize_policy(self):
         self.policy = Interface()
@@ -156,6 +174,26 @@ class Solo12Env(gym.Env):
         distance_to_origin = np.linalg.norm(self.device.baseState[0][:2])
         return self.healthy_reward - distance_to_origin
 
+    def _get_event_image_iebcs(self, img_in):
+        dt = 1000
+        if img_in is None:
+            return
+        img = cv.cvtColor(img_in, cv.COLOR_RGB2LUV)[:, :, 0]
+        if not self._is_init:
+            dsi.initImg(img)
+            self._is_init = True
+        else:
+            buf = dsi.updateImg(img, dt)
+            ev = EventBuffer(1)
+            ev.add_array(np.array(buf["ts"], dtype=np.uint64),
+                            np.array(buf["x"], dtype=np.uint16),
+                            np.array(buf["y"], dtype=np.uint16),
+                            np.array(buf["p"], dtype=np.uint64),
+                            100000000)
+            self._ed.update(ev, dt)
+            self._ev_full.increase_ev(ev)
+        return self._ed.im
+        
     def _get_obs(self):
         obs = {}
         obs["state"] = np.concatenate([
@@ -163,7 +201,7 @@ class Solo12Env(gym.Env):
             self.device.imu.accelerometer,
             self.device.imu.gyroscope
         ])
-        obs["image"] = self.render()
+        obs["image"] = self._get_event_image_iebcs(self.render())
         return obs
 
     def step(self, action):
@@ -188,24 +226,25 @@ class Solo12Env(gym.Env):
         return obs, reward, terminated, info
         
         
-    def render(self):
-        roll, pitch, yaw = doge_utils.quat_to_euler(self.device.baseState[1]) * 180 / math.pi
-        cam_target_pos = self.device.baseState[0]
-        cam_target_pos = (cam_target_pos[0], cam_target_pos[1], cam_target_pos[2] + 0.2)
+    def render(self, width=None, height=None, roll=0, pitch=0, yaw=0, cam_target_pos=(0.0, 0.0, 0.0), distance=0.1, stationary=False):
+        if not stationary:
+            roll, pitch, yaw = doge_utils.quat_to_euler(self.device.baseState[1]) * 180 / math.pi
+            cam_target_pos = self.device.baseState[0]
+            cam_target_pos = (cam_target_pos[0], cam_target_pos[1], cam_target_pos[2] + 0.2)
         up_axis_idx = 2
 
         view_matrix = p.computeViewMatrixFromYawPitchRoll(
             cameraTargetPosition=cam_target_pos,
-            distance=0.1,
-            yaw=yaw - 90,
+            distance=distance,
+            yaw=yaw - 90 if not stationary else yaw,
             pitch=pitch,
             roll=roll,
             upAxisIndex=up_axis_idx
         )
 
         (_, _, px, _, _) = p.getCameraImage(
-            width=self.render_width,
-            height=self.render_height,
+            width=self.render_width if width is None else width,
+            height=self.render_height if height is None else height,
             viewMatrix=view_matrix,
             projectionMatrix=self.projection_matrix,
             renderer=p.ER_BULLET_HARDWARE_OPENGL,
@@ -244,10 +283,10 @@ if __name__ == "__main__":
         if terminated:
             env.reset()
         if show_frame:
-            frame = env.render()
-            bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            cv2.imshow("frame", bgr_frame)
-            cv2.waitKey(1)
+            frame = obs["image"]
+            bgr_frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
+            cv.imshow("frame", bgr_frame)
+            cv.waitKey(1)
     end = time.time()
     print(f"Time taken: {end - start}")
     env.close()
