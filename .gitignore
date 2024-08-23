@@ -7,3 +7,5 @@ venv/
 MUJOCO_LOG.txt
 videos/
 __pycache__/
+logdir/
+nohup.out
