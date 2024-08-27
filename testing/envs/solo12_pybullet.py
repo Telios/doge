@@ -26,14 +26,14 @@ class Solo12Env(gym.Env):
                  reset_noise_scale=0.1,
                  render_width=64,
                  render_height=64,
-                 max_steps=500,
+                 max_steps=520,
                  ):
         self.healthy_reward = healthy_reward
         self.step_counter = 0
 
         self.action_space = Box(low=-1.6, high=1.6, shape=(3,)) # vx, vy, vz
         self.observation_space = Dict({
-            "state": Box(low=-np.inf, high=np.inf, shape=(18,), dtype=np.float64), # 12 joint positions, 6 imu readings
+            "state": Box(low=-np.inf, high=np.inf, shape=(21,), dtype=np.float64), # 12 joint positions, 6 imu readings, 3 last action
             "image": Box(low=0, high=255, shape=(render_height, render_width, 3), dtype=np.uint8)
         })
         
@@ -42,10 +42,11 @@ class Solo12Env(gym.Env):
         self.render_width = render_width
         self.render_height = render_height
         self.max_steps = max_steps
+        self.previous_action = np.zeros((3,))
 
         aspect = render_width / render_height
         self.projection_matrix = p.computeProjectionMatrixFOV(
-            fov=60,
+            fov=67.4, # dvxplorer micro, https://docs.inivation.com/_static/lenses/micro-lens-6-0-incl.pdf
             aspect=aspect,
             nearVal=0.01,
             farVal=100
@@ -168,11 +169,13 @@ class Solo12Env(gym.Env):
 
         return collided_with_sphere or fallen_over
     
-    def _calculate_reward(self):
+    def _calculate_reward(self, action):
         if self._terminated():
             return 0.0
         distance_to_origin = np.linalg.norm(self.device.baseState[0][:2])
-        return self.healthy_reward - distance_to_origin
+        action_reg = np.linalg.norm(np.array(self.previous_action) - np.array(action))
+        action_reg_scaled = action_reg * 0.1
+        return self.healthy_reward - distance_to_origin - action_reg_scaled
 
     def _get_event_image_iebcs(self, img_in):
         dt = 1000
@@ -199,7 +202,8 @@ class Solo12Env(gym.Env):
         obs["state"] = np.concatenate([
             self.device.joints.positions,
             self.device.imu.accelerometer,
-            self.device.imu.gyroscope
+            self.device.imu.gyroscope,
+            self.previous_action
         ])
         obs["image"] = self._get_event_image_iebcs(self.render())
         return obs
@@ -207,7 +211,7 @@ class Solo12Env(gym.Env):
     def step(self, action):
         self._controller(action)
         obs = self._get_obs()
-        reward = self._calculate_reward()
+        reward = self._calculate_reward(action)
         terminated = self._terminated()
         info = {}
         info["state"] = obs["state"]
@@ -216,9 +220,10 @@ class Solo12Env(gym.Env):
         info["reward"] = reward
         info["step"] = self.step_counter
 
-        if self.step_counter % 100 == 0:
+        if self.step_counter % 100 == 20:
             self._reset_and_apply_force_projectile()
 
+        self.previous_action = action
         self.step_counter += 1
         if self.step_counter >= self.max_steps:
             terminated = True
@@ -230,7 +235,8 @@ class Solo12Env(gym.Env):
         if not stationary:
             roll, pitch, yaw = doge_utils.quat_to_euler(self.device.baseState[1]) * 180 / math.pi
             cam_target_pos = self.device.baseState[0]
-            cam_target_pos = (cam_target_pos[0], cam_target_pos[1], cam_target_pos[2] + 0.2)
+            base_link_to_cam_offset = np.array([0.15, 0.0, 0.05])
+            cam_target_pos = (cam_target_pos[0] + base_link_to_cam_offset[0], cam_target_pos[1] + base_link_to_cam_offset[1], cam_target_pos[2] + base_link_to_cam_offset[2])
         up_axis_idx = 2
 
         view_matrix = p.computeViewMatrixFromYawPitchRoll(
@@ -265,17 +271,22 @@ class Solo12Env(gym.Env):
 
     def _reset_model(self):
         z_reset = 0.3
+        p.resetBaseVelocity(self.robotId, linearVelocity=[0.0, 0.0, 0.0], angularVelocity=[0.0, 0.0, 0.0])
         p.resetBasePositionAndOrientation(self.robotId, [0.0, 0.0, z_reset], [0, 0, 0, 1])
+        y_noise = np.random.uniform(-1, 1)
+        xy_offset = self.device.baseState[0][:2]
+        p.resetBasePositionAndOrientation(self.sphereId1, [3.0 + xy_offset[0], y_noise + xy_offset[1], 0.1], [0, 0, 0, 1])
 
         return self._get_obs()
 
     def reset(self):
         self.step_counter = 0
+        self.previous_action = np.zeros((3,))
         obs = self._reset_model()
         return obs
 
 if __name__ == "__main__":
-    show_frame = False
+    show_frame = True
     env = Solo12Env()
     start = time.time()
     for j in range(1000):
