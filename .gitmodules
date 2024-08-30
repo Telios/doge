@@ -10,6 +10,3 @@
 [submodule "external/quadruped_rl"]
 	path = external/quadruped_rl
 	url = https://github.com/Telios/quadruped_rl.git
-[submodule "external/master_board"]
-	path = external/master_board
-	url = https://github.com/open-dynamic-robot-initiative/master-board.git
