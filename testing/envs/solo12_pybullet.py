@@ -23,10 +23,11 @@ class Solo12Env(gym.Env):
     def __init__(self, 
                  healthy_reward=5.0,
                  terminate_when_unhealthy=True,
-                 reset_noise_scale=0.1,
+                 obs_noise_scale=0.025,
                  render_width=64,
                  render_height=64,
                  max_steps=520,
+                 add_noise=True,
                  ):
         self.healthy_reward = healthy_reward
         self.step_counter = 0
@@ -38,10 +39,11 @@ class Solo12Env(gym.Env):
         })
         
         self.terminate_when_unhealthy = terminate_when_unhealthy
-        self.reset_noise_scale = reset_noise_scale
+        self.obs_noise_scale = obs_noise_scale
         self.render_width = render_width
         self.render_height = render_height
         self.max_steps = max_steps
+        self.add_noise = add_noise
         self.previous_action = np.zeros((3,))
 
         aspect = render_width / render_height
@@ -203,8 +205,10 @@ class Solo12Env(gym.Env):
             self.device.joints.positions,
             self.device.imu.accelerometer,
             self.device.imu.gyroscope,
-            self.previous_action
         ])
+        if self.add_noise:
+            obs["state"] += np.random.normal(0, self.obs_noise_scale, obs["state"].shape)
+        obs["state"] = np.concatenate([obs["state"], self.previous_action])
         obs["image"] = self._get_event_image_iebcs(self.render())
         return obs
 
@@ -263,19 +267,56 @@ class Solo12Env(gym.Env):
     def close(self):
         self.device.Stop()
 
+    def _reset_sphere_size(self):
+        # remove old sphere body
+        p.removeBody(self.sphereId1)
+        # create new sphere body
+        mesh_scale_rnd = np.random.uniform(0.05, 0.15)
+        mesh_scale = [mesh_scale_rnd] * 3
+        visualShapeId = p.createVisualShape(
+            shapeType=p.GEOM_MESH,
+            fileName="sphere_smooth.obj",
+            halfExtents=[0.5, 0.5, 0.1],
+            rgbaColor=[1.0, 0.0, 0.0, 1.0],
+            specularColor=[0.4, 0.4, 0],
+            visualFramePosition=[0.0, 0.0, 0.0],
+            meshScale=mesh_scale,
+        )
+
+        collisionShapeId = p.createCollisionShape(
+            shapeType=p.GEOM_MESH,
+            fileName="sphere_smooth.obj",
+            collisionFramePosition=[0.0, 0.0, 0.0],
+            meshScale=mesh_scale,
+        )
+
+        mass = np.random.uniform(0.1, 0.5)
+        self.sphereId1 = p.createMultiBody(
+            baseMass=mass,
+            baseInertialFramePosition=[0, 0, 0],
+            baseCollisionShapeIndex=collisionShapeId,
+            baseVisualShapeIndex=visualShapeId,
+            basePosition=[1.6, 0.0, mesh_scale_rnd],
+            useMaximalCoordinates=True,
+        )
+
     def _reset_and_apply_force_projectile(self):
+        self._reset_sphere_size()
         y_noise = np.random.uniform(-1, 1)
         xy_offset = self.device.baseState[0][:2]
-        p.resetBasePositionAndOrientation(self.sphereId1, [3.0 + xy_offset[0], y_noise + xy_offset[1], 0.1], [0, 0, 0, 1])
-        p.resetBaseVelocity(self.sphereId1, linearVelocity=[-5.5, -(xy_offset[1] + y_noise) * 1.3, 3.0])
+        x_distance = np.random.uniform(3, 5)
+        x_vel = x_distance * 1.8
+        z_vel = 3.0
+        p.resetBasePositionAndOrientation(self.sphereId1, [x_distance + xy_offset[0], y_noise + xy_offset[1], 0.1], [0, 0, 0, 1])
+        p.resetBaseVelocity(self.sphereId1, linearVelocity=[-x_vel, -(xy_offset[1] + y_noise) * 1.4, z_vel])
 
     def _reset_model(self):
-        z_reset = 0.3
+        z_reset = 0.25
         p.resetBaseVelocity(self.robotId, linearVelocity=[0.0, 0.0, 0.0], angularVelocity=[0.0, 0.0, 0.0])
         p.resetBasePositionAndOrientation(self.robotId, [0.0, 0.0, z_reset], [0, 0, 0, 1])
         y_noise = np.random.uniform(-1, 1)
         xy_offset = self.device.baseState[0][:2]
-        p.resetBasePositionAndOrientation(self.sphereId1, [3.0 + xy_offset[0], y_noise + xy_offset[1], 0.1], [0, 0, 0, 1])
+        p.resetBasePositionAndOrientation(self.sphereId1, [3.0 + xy_offset[0], y_noise + xy_offset[1], 0.32], [0, 0, 0, 1])
 
         return self._get_obs()
 
