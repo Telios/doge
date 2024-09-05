@@ -3,7 +3,7 @@ import numpy as np
 import gymnasium as gym
 from gymnasium import utils
 from gymnasium.spaces import Box, Dict
-import torch, esim_torch, time, math, sys, os
+import torch, time, math, sys, os
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../"))
 from external.quadruped_rl.PyBulletSimulator import PyBulletSimulator
 from external.quadruped_rl.Params import RLParams
@@ -71,11 +71,6 @@ class Solo12Env(gym.Env):
         
     def _initialize_event_sim(self):
         self.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self._esim = esim_torch.ESIM(
-            contrast_threshold_neg=0.2,
-            contrast_threshold_pos=0.2,
-            refractory_period_ns=0,
-        )
         dsi.initSimu(self.render_height, self.render_width)
         dsi.initLatency(200, 50, 50, 300)
         dsi.initContrast(0.3, 0.3, 0.05)
