@@ -61,7 +61,7 @@ class Solo12Env(gym.Env):
                       q_init=self.params.q_init,
                       envID=0,
                       use_flat_plane=True,
-                      enable_pyb_GUI=True,
+                      enable_pyb_GUI=False,
                       dt=self.params.dt,
                       alpha=self.params.alpha)
         
