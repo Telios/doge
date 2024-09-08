@@ -67,7 +67,6 @@ class Solo12Env(gym.Env):
         
         self.robotId = self.device.pyb_sim.robotId
         self.sphere_radius = 0.1
-        self.current_origin = np.array([0.0, 0.0])
         
         self._initialize_policy()
         self._initialize_dynamic_objects()
@@ -174,7 +173,7 @@ class Solo12Env(gym.Env):
     def _calculate_reward(self, action):
         if self._terminated():
             return 0.0
-        distance_to_origin = np.linalg.norm(self.device.baseState[0][:2] - self.current_origin)
+        distance_to_origin = np.linalg.norm(self.device.baseState[0][:2])
         action_reg = np.linalg.norm(np.array(self.previous_action) - np.array(action))
         action_reg_scaled = action_reg * 0.1
         return self.healthy_reward - distance_to_origin - action_reg_scaled
@@ -308,7 +307,6 @@ class Solo12Env(gym.Env):
         x_distance = np.random.uniform(3, 5)
         x_vel = x_distance * 1.8
         z_vel = 3.0
-        self.current_origin = np.array(self.device.baseState[0][:2]) # reset origin for reward calculation
         p.resetBasePositionAndOrientation(self.sphereId1, [x_distance + xy_offset[0], y_noise + xy_offset[1], self.sphere_radius], [0, 0, 0, 1])
         p.resetBaseVelocity(self.sphereId1, linearVelocity=[-x_vel, -(xy_offset[1] + y_noise) * 1.4, z_vel])
 
@@ -325,7 +323,6 @@ class Solo12Env(gym.Env):
     def reset(self):
         self.step_counter = 0
         self.previous_action = np.zeros((3,))
-        self.current_origin = np.array([0.0, 0.0])
         obs = self._reset_model()
         return obs
 
