@@ -28,6 +28,7 @@ class Solo12Env(gym.Env):
                  render_height=64,
                  max_steps=520,
                  add_noise=True,
+                 minimal_distance_to_sphere=0.5, # half meter from base_link of robot
                  ):
         self.healthy_reward = healthy_reward
         self.step_counter = 0
@@ -44,6 +45,7 @@ class Solo12Env(gym.Env):
         self.render_height = render_height
         self.max_steps = max_steps
         self.add_noise = add_noise
+        self.minimal_distance_to_sphere = minimal_distance_to_sphere
         self.previous_action = np.zeros((3,))
 
         aspect = render_width / render_height
@@ -64,6 +66,7 @@ class Solo12Env(gym.Env):
                       alpha=self.params.alpha)
         
         self.robotId = self.device.pyb_sim.robotId
+        self.sphere_radius = 0.1
         
         self._initialize_policy()
         self._initialize_dynamic_objects()
@@ -131,7 +134,7 @@ class Solo12Env(gym.Env):
             baseInertialFramePosition=[0, 0, 0],
             baseCollisionShapeIndex=collisionShapeId,
             baseVisualShapeIndex=visualShapeId,
-            basePosition=[1.6, 0.0, 0.1],
+            basePosition=[1.6, 50.0, 0.1],
             useMaximalCoordinates=True,
         )
 
@@ -157,8 +160,9 @@ class Solo12Env(gym.Env):
             self.device.send_command_and_wait_end_of_cycle(False)
 
     def _check_collision(self):
-        contact_points = p.getContactPoints(self.robotId, self.sphereId1)
-        return len(contact_points) > 0
+        sphere_pos = p.getBasePositionAndOrientation(self.sphereId1)[0]
+        distance_to_base_link = np.linalg.norm(np.array(self.device.baseState[0]) - np.array(sphere_pos))
+        return distance_to_base_link + self.sphere_radius < self.minimal_distance_to_sphere
     
     def _terminated(self):
         collided_with_sphere = self._check_collision()
@@ -267,6 +271,7 @@ class Solo12Env(gym.Env):
         p.removeBody(self.sphereId1)
         # create new sphere body
         mesh_scale_rnd = np.random.uniform(0.05, 0.15)
+        self.sphere_radius = mesh_scale_rnd
         mesh_scale = [mesh_scale_rnd] * 3
         visualShapeId = p.createVisualShape(
             shapeType=p.GEOM_MESH,
@@ -302,7 +307,7 @@ class Solo12Env(gym.Env):
         x_distance = np.random.uniform(3, 5)
         x_vel = x_distance * 1.8
         z_vel = 3.0
-        p.resetBasePositionAndOrientation(self.sphereId1, [x_distance + xy_offset[0], y_noise + xy_offset[1], 0.1], [0, 0, 0, 1])
+        p.resetBasePositionAndOrientation(self.sphereId1, [x_distance + xy_offset[0], y_noise + xy_offset[1], self.sphere_radius], [0, 0, 0, 1])
         p.resetBaseVelocity(self.sphereId1, linearVelocity=[-x_vel, -(xy_offset[1] + y_noise) * 1.4, z_vel])
 
     def _reset_model(self):
