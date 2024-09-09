@@ -1,0 +1,1 @@
+sudo -E LD_LIBRARY_PATH=$LD_LIBRARY_PATH PYTHONPATH=$PYTHONPATH $(which python) dreamerv3/doge.py

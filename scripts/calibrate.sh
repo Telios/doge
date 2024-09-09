@@ -1,0 +1,1 @@
+sudo -E PYTHONPATH=$PYTHONPATH $(which python) external/quadruped_rl/real_solo12_test.py 

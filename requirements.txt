@@ -1,5 +1,0 @@
-opencv-python
-mujoco
-scipy
-torch
-gymnasium[all]

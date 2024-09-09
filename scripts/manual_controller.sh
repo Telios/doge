@@ -1,0 +1,1 @@
+sudo -E PYTHONPATH=$PYTHONPATH $(which python) external/quadruped_rl/controller.py 
