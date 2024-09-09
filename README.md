@@ -18,8 +18,16 @@ Install the external libraries
 ```
 
 ## Usage
-To run the code, use the following command:
+
+First you need to calibrate the robot.
+
 ```bash
-python testing/main.py
+bash scripts/calibrate.sh
 ```
-You should see a window pop up with the simulation running.
+
+To run doge with Solo12, use the following command:
+```bash
+bash scripts/run_doge.sh
+```
+
+Follow the instructions in the terminal to start doge.
