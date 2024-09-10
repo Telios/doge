@@ -29,6 +29,7 @@ class Solo12Env(gym.Env):
                  max_steps=520,
                  add_noise=True,
                  minimal_distance_to_sphere=0.5, # half meter from base_link of robot
+                 gui=False,
                  ):
         self.healthy_reward = healthy_reward
         self.step_counter = 0
@@ -61,12 +62,13 @@ class Solo12Env(gym.Env):
                       q_init=self.params.q_init,
                       envID=0,
                       use_flat_plane=True,
-                      enable_pyb_GUI=False,
+                      enable_pyb_GUI=gui,
                       dt=self.params.dt,
                       alpha=self.params.alpha)
         
         self.robotId = self.device.pyb_sim.robotId
         self.sphere_radius = 0.1
+        self._reset_projectile_times()
         
         self._initialize_policy()
         self._initialize_dynamic_objects()
@@ -76,7 +78,7 @@ class Solo12Env(gym.Env):
         self.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         dsi.initSimu(self.render_height, self.render_width)
         dsi.initLatency(200, 50, 50, 300)
-        dsi.initContrast(0.3, 0.3, 0.05)
+        dsi.initContrast(0.2, 0.2, 0.05)
         init_bgn_hist_cpp(f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy", f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy")
         self._ev_full = EventBuffer(1)
         self._ed = EventDisplay("Events", self.render_width, self.render_height, 2000)
@@ -138,6 +140,22 @@ class Solo12Env(gym.Env):
             useMaximalCoordinates=True,
         )
 
+        cylinder_visual = p.createVisualShape(
+            shapeType=p.GEOM_MESH,
+            fileName="cube.obj",
+            halfExtents=[0.5, 0.5, 0.1],
+            rgbaColor=[1.0, 1.0, 1.0, 1.0],
+            specularColor=[0.4, 0.4, 0],
+            visualFramePosition=[0.0, 0.0, 0.0],
+            meshScale=[0.3, 0.3, 1.8],
+        )
+
+        self.cylinderId = p.createMultiBody(
+            baseVisualShapeIndex=cylinder_visual,
+            basePosition=[1.6, 44.0, 0.9],
+            useMaximalCoordinates=True,
+        )
+
     def _controller(self, action):
         self.policy.vel_command = np.array(action)
         self.policy.update_observation(
@@ -174,9 +192,10 @@ class Solo12Env(gym.Env):
         if self._terminated():
             return 0.0
         distance_to_origin = np.linalg.norm(self.device.baseState[0][:2])
-        action_reg = np.linalg.norm(np.array(self.previous_action) - np.array(action))
-        action_reg_scaled = action_reg * 0.1
-        return self.healthy_reward - distance_to_origin - action_reg_scaled
+        action_reg = np.linalg.norm(np.array(self.previous_action) - np.array(action)) * 0.01
+        joint_vel_reg = np.linalg.norm(self.device.joints.velocities) * 0.005
+        speed_limiter = np.linalg.norm(action) * 0.01
+        return self.healthy_reward - distance_to_origin - action_reg - joint_vel_reg - speed_limiter
 
     def _get_event_image_iebcs(self, img_in):
         dt = 1000
@@ -223,7 +242,7 @@ class Solo12Env(gym.Env):
         info["reward"] = reward
         info["step"] = self.step_counter
 
-        if self.step_counter % 100 == 20:
+        if self._time_to_shoot():
             self._reset_and_apply_force_projectile()
 
         self.previous_action = action
@@ -265,6 +284,9 @@ class Solo12Env(gym.Env):
 
     def close(self):
         self.device.Stop()
+
+    def _time_to_shoot(self):
+        return self.step_counter in self.shooting_times
 
     def _reset_sphere_size(self):
         # remove old sphere body
@@ -308,7 +330,8 @@ class Solo12Env(gym.Env):
         x_vel = x_distance * 1.8
         z_vel = 3.0
         p.resetBasePositionAndOrientation(self.sphereId1, [x_distance + xy_offset[0], y_noise + xy_offset[1], self.sphere_radius], [0, 0, 0, 1])
-        p.resetBaseVelocity(self.sphereId1, linearVelocity=[-x_vel, -(xy_offset[1] + y_noise) * 1.4, z_vel])
+        p.resetBasePositionAndOrientation(self.cylinderId, [x_distance + xy_offset[0] + 0.5, y_noise + xy_offset[1] + 0.4, 0.9], [0, 0, 0, 1])
+        p.resetBaseVelocity(self.sphereId1, linearVelocity=[-x_vel, -y_noise * 1.4, z_vel])
 
     def _reset_model(self):
         z_reset = 0.25
@@ -317,27 +340,36 @@ class Solo12Env(gym.Env):
         y_noise = np.random.uniform(-1, 1)
         xy_offset = self.device.baseState[0][:2]
         p.resetBasePositionAndOrientation(self.sphereId1, [3.0 + xy_offset[0], y_noise + xy_offset[1], 0.32], [0, 0, 0, 1])
+        p.resetBasePositionAndOrientation(self.cylinderId, [3.5 + xy_offset[0], y_noise + xy_offset[1] + 0.4, 0.9], [0, 0, 0, 1])
 
         return self._get_obs()
-
+    
+    def _reset_projectile_times(self):
+        self.nr_spheres = np.random.randint(1, 6)
+        choices = [20, 120, 220, 320, 420]
+        self.shooting_times = np.random.choice(choices, self.nr_spheres, replace=False)
+    
     def reset(self):
         self.step_counter = 0
         self.previous_action = np.zeros((3,))
+        self._reset_projectile_times()
         obs = self._reset_model()
         return obs
 
 if __name__ == "__main__":
     show_frame = True
-    env = Solo12Env()
+    env = Solo12Env(gui=True)
     start = time.time()
     for j in range(1000):
-        obs, reward, terminated, info = env.step([0.0, 0.0, 0.0])
+        obs, reward, terminated, info = env.step([0.1, -0.0, 0.0])
         if terminated:
             env.reset()
         if show_frame:
             frame = obs["image"]
             bgr_frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
+            img = env.render()
             cv.imshow("frame", bgr_frame)
+            cv.imshow("img", cv.cvtColor(img, cv.COLOR_RGB2BGR))   
             cv.waitKey(1)
     end = time.time()
     print(f"Time taken: {end - start}")
