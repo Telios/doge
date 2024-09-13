@@ -28,7 +28,7 @@ class Solo12Env(gym.Env):
                  render_height=64,
                  max_steps=520,
                  add_noise=True,
-                 minimal_distance_to_sphere=0.5, # half meter from base_link of robot
+                 minimal_distance_to_sphere=0.25, # 25cm meter from base_link of robot + sphere radius
                  gui=False,
                  ):
         self.healthy_reward = healthy_reward
@@ -78,7 +78,7 @@ class Solo12Env(gym.Env):
         self.DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         dsi.initSimu(self.render_height, self.render_width)
         dsi.initLatency(200, 50, 50, 300)
-        dsi.initContrast(0.2, 0.2, 0.05)
+        dsi.initContrast(0.3, 0.3, 0.05)
         init_bgn_hist_cpp(f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy", f"{os.getcwd()}/external/IEBCS/data/noise_pos_161lux.npy")
         self._ev_full = EventBuffer(1)
         self._ed = EventDisplay("Events", self.render_width, self.render_height, 2000)
@@ -180,7 +180,8 @@ class Solo12Env(gym.Env):
     def _check_collision(self):
         sphere_pos = p.getBasePositionAndOrientation(self.sphereId1)[0]
         distance_to_base_link = np.linalg.norm(np.array(self.device.baseState[0]) - np.array(sphere_pos))
-        return distance_to_base_link + self.sphere_radius < self.minimal_distance_to_sphere
+        collisions = p.getContactPoints(self.robotId, self.sphereId1)
+        return distance_to_base_link + self.sphere_radius < self.minimal_distance_to_sphere or len(collisions) > 0
     
     def _terminated(self):
         collided_with_sphere = self._check_collision()
@@ -193,9 +194,8 @@ class Solo12Env(gym.Env):
             return 0.0
         distance_to_origin = np.linalg.norm(self.device.baseState[0][:2])
         action_reg = np.linalg.norm(np.array(self.previous_action) - np.array(action)) * 0.01
-        joint_vel_reg = np.linalg.norm(self.device.joints.velocities) * 0.005
         speed_limiter = np.linalg.norm(action) * 0.01
-        return self.healthy_reward - distance_to_origin - action_reg - joint_vel_reg - speed_limiter
+        return self.healthy_reward - distance_to_origin - action_reg - speed_limiter
 
     def _get_event_image_iebcs(self, img_in):
         dt = 1000
@@ -257,7 +257,7 @@ class Solo12Env(gym.Env):
         if not stationary:
             roll, pitch, yaw = doge_utils.quat_to_euler(self.device.baseState[1]) * 180 / math.pi
             cam_target_pos = self.device.baseState[0]
-            base_link_to_cam_offset = np.array([0.15, 0.0, 0.05])
+            base_link_to_cam_offset = np.array([0.15, 0.0, 0.2])
             cam_target_pos = (cam_target_pos[0] + base_link_to_cam_offset[0], cam_target_pos[1] + base_link_to_cam_offset[1], cam_target_pos[2] + base_link_to_cam_offset[2])
         up_axis_idx = 2
 
