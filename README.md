@@ -65,17 +65,18 @@ Follow the instructions in the terminal to start doge.
 
 <div align="center">
   <div style="width: 50%; margin: 6px 0; margin-bottom: 24px;float: left;">
-       <img  style="border-radius: 18px; " src="figures/event_camera_doge.gif" width="70%"/>
+       <img  style="border-radius: 18px; " src="figures/event_camera_doge.gif" width="50%"/>
          <p>Simulation results from the event-based camera</p>
   </div>
   <div style="width: 50%; margin: 6px 0; margin-bottom: 24px; float: left;">
-        <img style="border-radius: 18px;" src="figures/doge_in_mujoco.gif" width="70%"/>
+        <img style="border-radius: 18px;" src="figures/doge_in_mujoco.gif" width="50%"/>
           <p>Simulation results in Mujoco</p>
   </div>
 </div>
 
 * **Simulation Success**: The DreamerV3 agent successfully learned a robust policy in simulation, capable of consistently dodging incoming projectiles by coordinating body movement and orientation.
 
+https://github.com/user-attachments/assets/5563f51b-3089-4531-bf24-cd648b118fff
 
 * **Sim-to-Real Challenges**: While the policy performed well in simulation, the direct transfer to the physical Solo12 robot faced a significant sim-to-real gap. The real-world physics and sensor noise profiles proved distinct enough that the policy requires further refinement.
 * **Future Work**: Identifying pathways for bridging this gap include more aggressive domain randomization and sophisticated reward shaping to encourage more stable real-world behaviors.
